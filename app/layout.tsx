@@ -6,7 +6,7 @@ const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] });
 const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://ironbound-incremental.jacob-gamby.chatgpt.site'),
+  metadataBase: new URL('https://ngu-incremental.vercel.app'),
   title: 'Ironbound — Incremental RPG',
   description: 'Train your power, challenge the dungeon, and climb floor by floor.',
   alternates: { canonical: '/' },
