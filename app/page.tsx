@@ -7,12 +7,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Dumbbell,
+  Gem,
   Heart,
+  Minus,
   Play,
+  Plus,
   RotateCcw,
   Shield,
   Skull,
-  Sparkles,
+  Star,
   Square,
   Swords,
   Trophy,
@@ -25,6 +28,8 @@ import {
   POWER_UPGRADE_COST,
   SAVE_KEY,
   advanceTraining,
+  allocateStatPoint,
+  availableStatPoints,
   buyTrainingPower,
   enemyForFloor,
   initialGameState,
@@ -32,11 +37,13 @@ import {
   playerStats,
   randomDamage,
   resetCombat,
+  returnStatPoint,
   resolveCombatTick,
   saveableState,
   startCombat,
   xpNeeded,
   type GameState,
+  type StatKind,
 } from '@/lib/game';
 
 type Page = 'training' | 'dungeon';
@@ -49,7 +56,8 @@ function GameProgress({ value, label, className = '' }: { value: number; label: 
 type Action =
   | { type: 'hydrate'; state: GameState }
   | { type: 'train'; seconds: number }
-  | { type: 'set-share'; attackShare: number }
+  | { type: 'allocate-point'; kind: StatKind }
+  | { type: 'return-point'; kind: StatKind }
   | { type: 'buy-power' }
   | { type: 'select-floor'; floor: number }
   | { type: 'start-combat' }
@@ -62,8 +70,10 @@ function reducer(state: GameState, action: Action): GameState {
       return action.state;
     case 'train':
       return advanceTraining(state, action.seconds);
-    case 'set-share':
-      return { ...state, attackShare: Math.max(0, Math.min(100, action.attackShare)) };
+    case 'allocate-point':
+      return allocateStatPoint(state, action.kind);
+    case 'return-point':
+      return returnStatPoint(state, action.kind);
     case 'buy-power':
       return buyTrainingPower(state);
     case 'select-floor': {
@@ -80,12 +90,10 @@ function reducer(state: GameState, action: Action): GameState {
   }
 }
 
-function StatCard({ kind, state }: { kind: 'attack' | 'health'; state: GameState }) {
+function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState; dispatch: React.Dispatch<Action> }) {
   const isAttack = kind === 'attack';
-  const stat = isAttack ? state.attack : state.health;
-  const power = Math.round(state.trainingPower * (isAttack ? state.attackShare : 100 - state.attackShare) / 100);
-  const required = xpNeeded(stat.level);
-  const percent = Math.min(100, (stat.progress / required) * 100);
+  const points = isAttack ? state.attackPoints : state.healthPoints;
+  const available = availableStatPoints(state);
   const derived = playerStats(state);
   const Icon = isAttack ? Swords : Heart;
 
@@ -94,26 +102,30 @@ function StatCard({ kind, state }: { kind: 'attack' | 'health'; state: GameState
       <CardHeader>
         <div className="stat-title-row">
           <div className="stat-icon"><Icon aria-hidden="true" /></div>
-          <div><p className="eyebrow">{isAttack ? 'Attack training' : 'Vitality training'}</p><CardTitle>{isAttack ? 'Strike harder' : 'Endure longer'}</CardTitle></div>
-          <div className="stat-level"><span>LV.</span>{stat.level}</div>
+          <div><p className="eyebrow">{isAttack ? 'Attack points' : 'Health points'}</p><CardTitle>{isAttack ? 'Strike harder' : 'Endure longer'}</CardTitle></div>
+          <div className="stat-level"><span>PTS</span>{points}</div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="stat-metric-row">
           <div><span>{isAttack ? 'Damage' : 'Max health'}</span><strong>{isAttack ? `${derived.minDamage}–${derived.maxDamage}` : derived.maxHp}</strong></div>
-          <div className="rate"><span>Allocated</span><strong>{power}<small> PWR</small></strong></div>
+          <div className="rate"><span>Each point</span><strong>{isAttack ? '+3' : '+10'}<small> {isAttack ? 'MAX DMG' : 'HP'}</small></strong></div>
         </div>
-        <div className="progress-copy"><span>Level progress</span><span>{Math.floor(stat.progress)} / {required}</span></div>
-        <GameProgress label={`${kind} level progress`} value={percent} />
+        <div className="point-controls">
+          <button type="button" className="point-button return-point" disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /> Return</button>
+          <button type="button" className="point-button allocate-point" disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /> Allocate</button>
+        </div>
       </CardContent>
     </Card>
   );
 }
 
 function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React.Dispatch<Action> }) {
-  const healthShare = 100 - state.attackShare;
   const stats = playerStats(state);
-  const canBuy = state.xp >= POWER_UPGRADE_COST;
+  const canBuy = state.essence >= POWER_UPGRADE_COST;
+  const requiredXp = xpNeeded(state.playerLevel);
+  const levelProgress = state.playerXp / requiredXp * 100;
+  const available = availableStatPoints(state);
 
   return (
     <div className="screen training-screen">
@@ -125,14 +137,31 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
       <section className="player-summary" aria-labelledby="player-heading">
         <div className="section-heading">
           <div><p className="eyebrow">Player</p><h2 id="player-heading">The Wanderer</h2></div>
-          <div className="xp-pill"><Sparkles aria-hidden="true" /><span>{state.xp} XP</span></div>
+          <div className="xp-pill"><Gem aria-hidden="true" /><span>{state.essence} Essence</span></div>
         </div>
         <div className="summary-grid">
-          <div><Swords aria-hidden="true" /><span>ATK LV. {state.attack.level}</span><strong>{stats.minDamage}–{stats.maxDamage}</strong></div>
-          <div><Heart aria-hidden="true" /><span>HP LV. {state.health.level}</span><strong>{stats.maxHp}</strong></div>
+          <div><Swords aria-hidden="true" /><span>ATK +{state.attackPoints}</span><strong>{stats.minDamage}–{stats.maxDamage}</strong></div>
+          <div><Heart aria-hidden="true" /><span>HP +{state.healthPoints}</span><strong>{stats.maxHp}</strong></div>
           <div><Activity aria-hidden="true" /><span>BEST FLOOR</span><strong>{state.highestFloor}</strong></div>
         </div>
       </section>
+
+      <Card className="level-card">
+        <CardHeader>
+          <div className="level-heading">
+            <div className="level-emblem"><Star aria-hidden="true" /></div>
+            <div><p className="eyebrow">Player level</p><CardTitle>Every level grants one stat point</CardTitle></div>
+            <div className="level-number"><span>LV.</span>{state.playerLevel}</div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="level-progress-copy"><span>Next stat point</span><strong>{Math.floor(state.playerXp)} / {requiredXp} XP</strong></div>
+          <GameProgress label="Player level progress" value={levelProgress} />
+          <div className={`point-pool ${available > 0 ? 'has-points' : ''}`}>
+            <span>Available points</span><strong>{available}</strong><small>{available > 0 ? 'Allocate below' : 'Level up for another'}</small>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="power-card">
         <CardHeader>
@@ -144,35 +173,15 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
         <CardContent>
           <div><div className="power-value">{state.trainingPower}</div><p className="power-caption">TOTAL POWER</p></div>
           <button className="power-button" type="button" disabled={!canBuy} onClick={() => dispatch({ type: 'buy-power' })}>
-            <span>Increase power</span><strong>+{POWER_UPGRADE_AMOUNT}</strong><small>{POWER_UPGRADE_COST} XP</small>
+            <span>Increase power</span><strong>+{POWER_UPGRADE_AMOUNT}</strong><small>{POWER_UPGRADE_COST} ESS</small>
           </button>
         </CardContent>
       </Card>
 
-      <Card className="allocation-card">
-        <CardHeader><p className="eyebrow">Power allocation</p><CardTitle>Choose your edge</CardTitle></CardHeader>
-        <CardContent>
-          <div className="allocation-values">
-            <div className="attack-value"><span>ATK</span><strong>{state.attackShare}%</strong><small>{Math.round(state.trainingPower * state.attackShare / 100)} power</small></div>
-            <div className="hp-value"><span>HP</span><strong>{healthShare}%</strong><small>{Math.round(state.trainingPower * healthShare / 100)} power</small></div>
-          </div>
-          <input
-            type="range"
-            aria-label="Balance training power. Left favors attack; right favors health."
-            className="allocation-slider"
-            value={healthShare}
-            min={0}
-            max={100}
-            step={5}
-            onChange={(event) => dispatch({ type: 'set-share', attackShare: 100 - Number(event.currentTarget.value) })}
-          />
-          <div className="slider-labels"><span>← More attack</span><span>More health →</span></div>
-        </CardContent>
-      </Card>
-
-      <StatCard kind="attack" state={state} />
-      <StatCard kind="health" state={state} />
-      <p className="training-note"><Zap aria-hidden="true" /> Training continues automatically while the game is open.</p>
+      <div className="allocation-intro"><div><p className="eyebrow">Stat allocation</p><h2>Build your fighter</h2></div><span>Free respec</span></div>
+      <StatCard kind="attack" state={state} dispatch={dispatch} />
+      <StatCard kind="health" state={state} dispatch={dispatch} />
+      <p className="training-note"><Zap aria-hidden="true" /> Training earns player XP automatically. Points can always be moved for free.</p>
     </div>
   );
 }
@@ -219,18 +228,18 @@ function DungeonScreen({ state, dispatch }: { state: GameState; dispatch: React.
             <span className="battle-line" /><Swords /><span className="battle-state">{fighting ? 'CLASHING' : state.combat.status.toUpperCase()}</span>
           </div>
 
-          <Fighter side="player" name="The Wanderer" title={`ATK level ${state.attack.level}`} hp={state.combat.playerHp} maxHp={player.maxHp} damage={`${player.minDamage}–${player.maxDamage}`} hit={state.combat.lastEnemyDamage} />
+          <Fighter side="player" name="The Wanderer" title={`Level ${state.playerLevel} · ATK +${state.attackPoints}`} hp={state.combat.playerHp} maxHp={player.maxHp} damage={`${player.minDamage}–${player.maxDamage}`} hit={state.combat.lastEnemyDamage} />
         </CardContent>
       </Card>
 
       <section className="combat-controls" aria-label="Dungeon controls">
         <div className="floor-selector">
           <button className="floor-button" type="button" aria-label="Previous floor" disabled={!canGoDown} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor - 1 })}><ChevronLeft /></button>
-          <div><span>Selected floor</span><strong>{state.selectedFloor}</strong><small>{enemy.reward} XP reward</small></div>
+          <div><span>Selected floor</span><strong>{state.selectedFloor}</strong><small>{enemy.xpReward} XP · {enemy.essenceReward} Essence</small></div>
           <button className="floor-button" type="button" aria-label="Next floor" disabled={!canGoUp} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor + 1 })}><ChevronRight /></button>
         </div>
 
-        {state.combat.status === 'victory' && <div className="result-banner victory"><Trophy aria-hidden="true" /><span>Floor cleared</span><strong>+{enemy.reward} XP</strong></div>}
+        {state.combat.status === 'victory' && <div className="result-banner victory"><Trophy aria-hidden="true" /><span>Floor cleared</span><strong>+{enemy.xpReward} XP · +{enemy.essenceReward} ESS</strong></div>}
         {state.combat.status === 'defeat' && <div className="result-banner defeat"><Skull aria-hidden="true" /><span>Defeated</span><strong>Train and return</strong></div>}
 
         <button type="button" className={`combat-button ${fighting ? 'stop-button' : ''}`} onClick={() => dispatch({ type: fighting ? 'reset-combat' : 'start-combat' })}>

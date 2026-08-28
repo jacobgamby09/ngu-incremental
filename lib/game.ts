@@ -1,12 +1,9 @@
 export const SAVE_KEY = 'ironbound-save-v1';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const POWER_UPGRADE_AMOUNT = 10;
 export const POWER_UPGRADE_COST = 50;
 
-export type StatProgress = {
-  level: number;
-  progress: number;
-};
+export type StatKind = 'attack' | 'health';
 
 export type CombatState = {
   status: 'idle' | 'fighting' | 'victory' | 'defeat';
@@ -19,11 +16,12 @@ export type CombatState = {
 
 export type GameState = {
   saveVersion: number;
-  xp: number;
+  playerLevel: number;
+  playerXp: number;
+  essence: number;
   trainingPower: number;
-  attackShare: number;
-  attack: StatProgress;
-  health: StatProgress;
+  attackPoints: number;
+  healthPoints: number;
   highestFloor: number;
   selectedFloor: number;
   combat: CombatState;
@@ -35,16 +33,18 @@ export type Enemy = {
   maxHp: number;
   minDamage: number;
   maxDamage: number;
-  reward: number;
+  xpReward: number;
+  essenceReward: number;
 };
 
 export const initialGameState: GameState = {
   saveVersion: SAVE_VERSION,
-  xp: 80,
+  playerLevel: 3,
+  playerXp: 20,
+  essence: 80,
   trainingPower: 100,
-  attackShare: 70,
-  attack: { level: 1, progress: 18 },
-  health: { level: 1, progress: 12 },
+  attackPoints: 1,
+  healthPoints: 1,
   highestFloor: 1,
   selectedFloor: 1,
   combat: {
@@ -58,41 +58,56 @@ export const initialGameState: GameState = {
 };
 
 export function xpNeeded(level: number) {
-  return Math.round(42 * Math.pow(level, 1.32));
+  return Math.round(44 * Math.pow(level, 1.28));
 }
 
-export function addStatProgress(stat: StatProgress, amount: number): StatProgress {
-  let level = stat.level;
-  let progress = stat.progress + amount;
-  let required = xpNeeded(level);
+export function earnedStatPoints(state: Pick<GameState, 'playerLevel'>) {
+  return Math.max(0, state.playerLevel - 1);
+}
 
-  while (progress >= required) {
-    progress -= required;
-    level += 1;
-    required = xpNeeded(level);
+export function availableStatPoints(state: Pick<GameState, 'playerLevel' | 'attackPoints' | 'healthPoints'>) {
+  return Math.max(0, earnedStatPoints(state) - state.attackPoints - state.healthPoints);
+}
+
+export function addPlayerXp(state: GameState, amount: number): GameState {
+  if (!Number.isFinite(amount) || amount <= 0) return state;
+  let playerLevel = state.playerLevel;
+  let playerXp = state.playerXp + amount;
+  let required = xpNeeded(playerLevel);
+
+  while (playerXp >= required) {
+    playerXp -= required;
+    playerLevel += 1;
+    required = xpNeeded(playerLevel);
   }
 
-  return { level, progress };
+  return { ...state, playerLevel, playerXp };
 }
 
 export function advanceTraining(state: GameState, seconds: number): GameState {
   if (!Number.isFinite(seconds) || seconds <= 0) return state;
-  const points = (state.trainingPower / 26) * Math.min(seconds, 2);
-  const attackPoints = points * (state.attackShare / 100);
-  const healthPoints = points - attackPoints;
-
-  return {
-    ...state,
-    attack: addStatProgress(state.attack, attackPoints),
-    health: addStatProgress(state.health, healthPoints),
-  };
+  const gainedXp = (state.trainingPower / 26) * Math.min(seconds, 2);
+  return addPlayerXp(state, gainedXp);
 }
 
-export function playerStats(state: GameState) {
+export function allocateStatPoint(state: GameState, kind: StatKind): GameState {
+  if (availableStatPoints(state) === 0) return state;
+  return kind === 'attack'
+    ? { ...state, attackPoints: state.attackPoints + 1 }
+    : { ...state, healthPoints: state.healthPoints + 1 };
+}
+
+export function returnStatPoint(state: GameState, kind: StatKind): GameState {
+  if (kind === 'attack' && state.attackPoints > 0) return { ...state, attackPoints: state.attackPoints - 1 };
+  if (kind === 'health' && state.healthPoints > 0) return { ...state, healthPoints: state.healthPoints - 1 };
+  return state;
+}
+
+export function playerStats(state: Pick<GameState, 'attackPoints' | 'healthPoints'>) {
   return {
-    minDamage: 1 + Math.floor(state.attack.level * 0.7),
-    maxDamage: 5 + state.attack.level * 3,
-    maxHp: 20 + state.health.level * 10,
+    minDamage: 1 + Math.floor(state.attackPoints * 0.7),
+    maxDamage: 5 + state.attackPoints * 3,
+    maxHp: 20 + state.healthPoints * 10,
   };
 }
 
@@ -114,7 +129,8 @@ export function enemyForFloor(floor: number): Enemy {
     maxHp: 22 + safeFloor * 12 + Math.floor(safeFloor ** 1.45),
     minDamage: 1 + Math.floor(safeFloor * 0.8),
     maxDamage: 3 + Math.floor(safeFloor * 1.55),
-    reward: 20 + safeFloor * 10,
+    xpReward: 18 + safeFloor * 8,
+    essenceReward: 12 + safeFloor * 6,
   };
 }
 
@@ -145,11 +161,11 @@ export function resolveCombatTick(state: GameState, playerDamage: number, enemyD
   const playerHit = `${enemy.name} takes ${playerDamage} damage.`;
 
   if (enemyHp === 0) {
-    const clearedFloor = state.selectedFloor;
-    const highestFloor = Math.max(state.highestFloor, clearedFloor + 1);
+    const highestFloor = Math.max(state.highestFloor, state.selectedFloor + 1);
+    const rewarded = addPlayerXp(state, enemy.xpReward);
     return {
-      ...state,
-      xp: state.xp + enemy.reward,
+      ...rewarded,
+      essence: state.essence + enemy.essenceReward,
       highestFloor,
       combat: {
         ...state.combat,
@@ -157,7 +173,7 @@ export function resolveCombatTick(state: GameState, playerDamage: number, enemyD
         enemyHp: 0,
         lastPlayerDamage: playerDamage,
         lastEnemyDamage: null,
-        log: [`Victory. +${enemy.reward} XP`, playerHit, ...state.combat.log].slice(0, 8),
+        log: [`Victory. +${enemy.xpReward} XP · +${enemy.essenceReward} Essence`, playerHit, ...state.combat.log].slice(0, 8),
       },
     };
   }
@@ -195,28 +211,71 @@ export function resetCombat(state: GameState): GameState {
 }
 
 export function buyTrainingPower(state: GameState): GameState {
-  if (state.xp < POWER_UPGRADE_COST) return state;
+  if (state.essence < POWER_UPGRADE_COST) return state;
   return {
     ...state,
-    xp: state.xp - POWER_UPGRADE_COST,
+    essence: state.essence - POWER_UPGRADE_COST,
     trainingPower: state.trainingPower + POWER_UPGRADE_AMOUNT,
   };
+}
+
+type LegacySave = {
+  saveVersion?: number;
+  xp?: number;
+  trainingPower?: number;
+  attackShare?: number;
+  attack?: { level?: number; progress?: number };
+  health?: { level?: number; progress?: number };
+  highestFloor?: number;
+  selectedFloor?: number;
+};
+
+function migrateLegacySave(legacy: LegacySave): GameState {
+  const attackLevel = Math.max(1, Math.floor(legacy.attack?.level ?? 1));
+  const healthLevel = Math.max(1, Math.floor(legacy.health?.level ?? 1));
+  const playerLevel = Math.max(3, attackLevel + healthLevel - 1);
+  const earned = playerLevel - 1;
+  const attackShare = Math.max(0, Math.min(100, legacy.attackShare ?? 50));
+  const attackPoints = Math.round(earned * attackShare / 100);
+  const healthPoints = earned - attackPoints;
+  const combinedProgress = Math.max(0, (legacy.attack?.progress ?? 0) + (legacy.health?.progress ?? 0));
+
+  return resetCombat({
+    ...initialGameState,
+    playerLevel,
+    playerXp: Math.min(combinedProgress, xpNeeded(playerLevel) - 1),
+    essence: Math.max(0, Math.floor(legacy.xp ?? initialGameState.essence)),
+    trainingPower: Math.max(1, Math.floor(legacy.trainingPower ?? initialGameState.trainingPower)),
+    attackPoints,
+    healthPoints,
+    highestFloor: Math.max(1, Math.floor(legacy.highestFloor ?? 1)),
+    selectedFloor: Math.max(1, Math.floor(legacy.selectedFloor ?? 1)),
+  });
 }
 
 export function loadGame(raw: string | null): GameState {
   if (!raw) return initialGameState;
   try {
-    const parsed = JSON.parse(raw) as Partial<GameState>;
+    const parsed = JSON.parse(raw) as Partial<GameState> & LegacySave;
+    if (parsed.saveVersion === 1) return migrateLegacySave(parsed);
     if (parsed.saveVersion !== SAVE_VERSION) return initialGameState;
+
     const merged: GameState = {
       ...initialGameState,
       ...parsed,
-      attack: { ...initialGameState.attack, ...parsed.attack },
-      health: { ...initialGameState.health, ...parsed.health },
       combat: initialGameState.combat,
     };
-    merged.attackShare = Math.max(0, Math.min(100, merged.attackShare));
-    merged.selectedFloor = Math.max(1, Math.min(merged.highestFloor, merged.selectedFloor));
+    merged.playerLevel = Math.max(1, Math.floor(merged.playerLevel));
+    merged.playerXp = Math.max(0, Math.min(merged.playerXp, xpNeeded(merged.playerLevel) - 1));
+    merged.attackPoints = Math.max(0, Math.floor(merged.attackPoints));
+    merged.healthPoints = Math.max(0, Math.floor(merged.healthPoints));
+    const earned = earnedStatPoints(merged);
+    if (merged.attackPoints + merged.healthPoints > earned) {
+      merged.healthPoints = Math.min(merged.healthPoints, earned);
+      merged.attackPoints = Math.min(merged.attackPoints, earned - merged.healthPoints);
+    }
+    merged.highestFloor = Math.max(1, Math.floor(merged.highestFloor));
+    merged.selectedFloor = Math.max(1, Math.min(merged.highestFloor, Math.floor(merged.selectedFloor)));
     return resetCombat(merged);
   } catch {
     return initialGameState;

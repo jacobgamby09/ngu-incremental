@@ -2,41 +2,67 @@ import { describe, expect, it } from 'vitest';
 
 import {
   POWER_UPGRADE_COST,
-  addStatProgress,
+  addPlayerXp,
   advanceTraining,
+  allocateStatPoint,
+  availableStatPoints,
   buyTrainingPower,
   enemyForFloor,
   initialGameState,
   loadGame,
   playerStats,
   resolveCombatTick,
+  returnStatPoint,
   startCombat,
   xpNeeded,
 } from './game';
 
-describe('training progression', () => {
-  it('splits every training tick using one complementary allocation', () => {
-    const state = { ...initialGameState, attackShare: 70, trainingPower: 100 };
-    const next = advanceTraining(state, 1);
-    const totalGain = next.attack.progress - state.attack.progress + next.health.progress - state.health.progress;
-    const attackGain = next.attack.progress - state.attack.progress;
+describe('player level progression', () => {
+  it('sends all automatic training into one player XP bar', () => {
+    const next = advanceTraining(initialGameState, 1);
 
-    expect(totalGain).toBeCloseTo(100 / 26, 5);
-    expect(attackGain / totalGain).toBeCloseTo(0.7, 5);
+    expect(next.playerXp - initialGameState.playerXp).toBeCloseTo(100 / 26, 5);
+    expect(next.attackPoints).toBe(initialGameState.attackPoints);
+    expect(next.healthPoints).toBe(initialGameState.healthPoints);
   });
 
-  it('carries progress through a level-up', () => {
-    const required = xpNeeded(1);
-    expect(addStatProgress({ level: 1, progress: required - 2 }, 5)).toEqual({ level: 2, progress: 3 });
+  it('grants one available stat point on level-up and carries overflow XP', () => {
+    const state = { ...initialGameState, playerXp: xpNeeded(initialGameState.playerLevel) - 2 };
+    const next = addPlayerXp(state, 5);
+
+    expect(next.playerLevel).toBe(initialGameState.playerLevel + 1);
+    expect(next.playerXp).toBe(3);
+    expect(availableStatPoints(next)).toBe(1);
   });
 
-  it('only buys power when the player can afford it', () => {
-    const rich = { ...initialGameState, xp: POWER_UPGRADE_COST };
-    const poor = { ...initialGameState, xp: POWER_UPGRADE_COST - 1 };
+  it('allocates and returns points freely without exceeding earned points', () => {
+    const leveled = { ...initialGameState, playerLevel: 4 };
+    const allocated = allocateStatPoint(leveled, 'attack');
+    const blocked = allocateStatPoint(allocated, 'health');
+    const returned = returnStatPoint(allocated, 'attack');
 
-    expect(buyTrainingPower(rich).trainingPower).toBe(initialGameState.trainingPower + 10);
-    expect(buyTrainingPower(rich).xp).toBe(0);
-    expect(buyTrainingPower(poor)).toBe(poor);
+    expect(allocated.attackPoints).toBe(2);
+    expect(availableStatPoints(allocated)).toBe(0);
+    expect(blocked).toBe(allocated);
+    expect(returned.attackPoints).toBe(1);
+    expect(availableStatPoints(returned)).toBe(1);
+  });
+
+  it('derives combat stats only from allocated points', () => {
+    expect(playerStats({ attackPoints: 3, healthPoints: 4 })).toEqual({
+      minDamage: 3,
+      maxDamage: 14,
+      maxHp: 60,
+    });
+  });
+
+  it('spends Essence—not XP progress—on Training Power', () => {
+    const state = { ...initialGameState, essence: POWER_UPGRADE_COST, playerXp: 37 };
+    const next = buyTrainingPower(state);
+
+    expect(next.trainingPower).toBe(initialGameState.trainingPower + 10);
+    expect(next.essence).toBe(0);
+    expect(next.playerXp).toBe(37);
   });
 });
 
@@ -48,20 +74,42 @@ describe('dungeon combat', () => {
     expect(started.combat.enemyHp).toBe(enemyForFloor(1).maxHp);
   });
 
-  it('rewards a victory once and unlocks the next floor', () => {
-    const started = startCombat({ ...initialGameState, xp: 0 });
+  it('rewards XP and Essence once and unlocks the next floor', () => {
+    const base = { ...initialGameState, playerXp: 0, essence: 0 };
+    const started = startCombat(base);
     const victory = resolveCombatTick(started, started.combat.enemyHp, 999);
     const repeated = resolveCombatTick(victory, 999, 999);
+    const enemy = enemyForFloor(1);
 
     expect(victory.combat.status).toBe('victory');
-    expect(victory.xp).toBe(enemyForFloor(1).reward);
+    expect(victory.playerXp).toBe(enemy.xpReward);
+    expect(victory.essence).toBe(enemy.essenceReward);
     expect(victory.highestFloor).toBe(2);
-    expect(victory.selectedFloor).toBe(1);
-    expect(repeated.xp).toBe(victory.xp);
+    expect(repeated.playerXp).toBe(victory.playerXp);
+    expect(repeated.essence).toBe(victory.essence);
   });
 });
 
 describe('save handling', () => {
+  it('migrates the previous percentage-allocation save into level points', () => {
+    const migrated = loadGame(JSON.stringify({
+      saveVersion: 1,
+      xp: 80,
+      trainingPower: 110,
+      attackShare: 70,
+      attack: { level: 1, progress: 18 },
+      health: { level: 1, progress: 12 },
+      highestFloor: 2,
+      selectedFloor: 2,
+    }));
+
+    expect(migrated.saveVersion).toBe(2);
+    expect(migrated.playerLevel).toBe(3);
+    expect(migrated.attackPoints + migrated.healthPoints).toBe(2);
+    expect(migrated.essence).toBe(80);
+    expect(migrated.trainingPower).toBe(110);
+  });
+
   it('falls back safely when saved data is invalid', () => {
     expect(loadGame('{broken')).toEqual(initialGameState);
   });
