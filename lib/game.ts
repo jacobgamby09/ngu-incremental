@@ -1,7 +1,6 @@
 export const SAVE_KEY = 'ironbound-save-v1';
-export const SAVE_VERSION = 2;
-export const POWER_UPGRADE_AMOUNT = 10;
-export const POWER_UPGRADE_COST = 50;
+export const SAVE_VERSION = 3;
+export const TRAINING_XP_PER_SECOND = 4;
 
 export type StatKind = 'attack' | 'health';
 
@@ -18,8 +17,6 @@ export type GameState = {
   saveVersion: number;
   playerLevel: number;
   playerXp: number;
-  essence: number;
-  trainingPower: number;
   attackPoints: number;
   healthPoints: number;
   highestFloor: number;
@@ -34,15 +31,12 @@ export type Enemy = {
   minDamage: number;
   maxDamage: number;
   xpReward: number;
-  essenceReward: number;
 };
 
 export const initialGameState: GameState = {
   saveVersion: SAVE_VERSION,
   playerLevel: 3,
   playerXp: 20,
-  essence: 80,
-  trainingPower: 100,
   attackPoints: 1,
   healthPoints: 1,
   highestFloor: 1,
@@ -86,7 +80,7 @@ export function addPlayerXp(state: GameState, amount: number): GameState {
 
 export function advanceTraining(state: GameState, seconds: number): GameState {
   if (!Number.isFinite(seconds) || seconds <= 0) return state;
-  const gainedXp = (state.trainingPower / 26) * Math.min(seconds, 2);
+  const gainedXp = TRAINING_XP_PER_SECOND * Math.min(seconds, 2);
   return addPlayerXp(state, gainedXp);
 }
 
@@ -130,7 +124,6 @@ export function enemyForFloor(floor: number): Enemy {
     minDamage: 1 + Math.floor(safeFloor * 0.8),
     maxDamage: 3 + Math.floor(safeFloor * 1.55),
     xpReward: 18 + safeFloor * 8,
-    essenceReward: 12 + safeFloor * 6,
   };
 }
 
@@ -165,7 +158,6 @@ export function resolveCombatTick(state: GameState, playerDamage: number, enemyD
     const rewarded = addPlayerXp(state, enemy.xpReward);
     return {
       ...rewarded,
-      essence: state.essence + enemy.essenceReward,
       highestFloor,
       combat: {
         ...state.combat,
@@ -173,7 +165,7 @@ export function resolveCombatTick(state: GameState, playerDamage: number, enemyD
         enemyHp: 0,
         lastPlayerDamage: playerDamage,
         lastEnemyDamage: null,
-        log: [`Victory. +${enemy.xpReward} XP · +${enemy.essenceReward} Essence`, playerHit, ...state.combat.log].slice(0, 8),
+        log: [`Victory. +${enemy.xpReward} XP`, playerHit, ...state.combat.log].slice(0, 8),
       },
     };
   }
@@ -210,15 +202,6 @@ export function resetCombat(state: GameState): GameState {
   };
 }
 
-export function buyTrainingPower(state: GameState): GameState {
-  if (state.essence < POWER_UPGRADE_COST) return state;
-  return {
-    ...state,
-    essence: state.essence - POWER_UPGRADE_COST,
-    trainingPower: state.trainingPower + POWER_UPGRADE_AMOUNT,
-  };
-}
-
 type LegacySave = {
   saveVersion?: number;
   xp?: number;
@@ -226,6 +209,16 @@ type LegacySave = {
   attackShare?: number;
   attack?: { level?: number; progress?: number };
   health?: { level?: number; progress?: number };
+  highestFloor?: number;
+  selectedFloor?: number;
+};
+
+type LevelSaveV2 = {
+  saveVersion?: number;
+  playerLevel?: number;
+  playerXp?: number;
+  attackPoints?: number;
+  healthPoints?: number;
   highestFloor?: number;
   selectedFloor?: number;
 };
@@ -244,12 +237,22 @@ function migrateLegacySave(legacy: LegacySave): GameState {
     ...initialGameState,
     playerLevel,
     playerXp: Math.min(combinedProgress, xpNeeded(playerLevel) - 1),
-    essence: Math.max(0, Math.floor(legacy.xp ?? initialGameState.essence)),
-    trainingPower: Math.max(1, Math.floor(legacy.trainingPower ?? initialGameState.trainingPower)),
     attackPoints,
     healthPoints,
     highestFloor: Math.max(1, Math.floor(legacy.highestFloor ?? 1)),
     selectedFloor: Math.max(1, Math.floor(legacy.selectedFloor ?? 1)),
+  });
+}
+
+function migrateLevelSave(save: LevelSaveV2): GameState {
+  return resetCombat({
+    ...initialGameState,
+    playerLevel: save.playerLevel ?? initialGameState.playerLevel,
+    playerXp: save.playerXp ?? initialGameState.playerXp,
+    attackPoints: save.attackPoints ?? initialGameState.attackPoints,
+    healthPoints: save.healthPoints ?? initialGameState.healthPoints,
+    highestFloor: save.highestFloor ?? initialGameState.highestFloor,
+    selectedFloor: save.selectedFloor ?? initialGameState.selectedFloor,
   });
 }
 
@@ -258,6 +261,7 @@ export function loadGame(raw: string | null): GameState {
   try {
     const parsed = JSON.parse(raw) as Partial<GameState> & LegacySave;
     if (parsed.saveVersion === 1) return migrateLegacySave(parsed);
+    if (parsed.saveVersion === 2) return normalizeSave(migrateLevelSave(parsed));
     if (parsed.saveVersion !== SAVE_VERSION) return initialGameState;
 
     const merged: GameState = {
@@ -265,21 +269,26 @@ export function loadGame(raw: string | null): GameState {
       ...parsed,
       combat: initialGameState.combat,
     };
-    merged.playerLevel = Math.max(1, Math.floor(merged.playerLevel));
-    merged.playerXp = Math.max(0, Math.min(merged.playerXp, xpNeeded(merged.playerLevel) - 1));
-    merged.attackPoints = Math.max(0, Math.floor(merged.attackPoints));
-    merged.healthPoints = Math.max(0, Math.floor(merged.healthPoints));
-    const earned = earnedStatPoints(merged);
-    if (merged.attackPoints + merged.healthPoints > earned) {
-      merged.healthPoints = Math.min(merged.healthPoints, earned);
-      merged.attackPoints = Math.min(merged.attackPoints, earned - merged.healthPoints);
-    }
-    merged.highestFloor = Math.max(1, Math.floor(merged.highestFloor));
-    merged.selectedFloor = Math.max(1, Math.min(merged.highestFloor, Math.floor(merged.selectedFloor)));
-    return resetCombat(merged);
+    return normalizeSave(merged);
   } catch {
     return initialGameState;
   }
+}
+
+function normalizeSave(state: GameState): GameState {
+  const normalized = { ...state, saveVersion: SAVE_VERSION };
+  normalized.playerLevel = Math.max(1, Math.floor(normalized.playerLevel));
+  normalized.playerXp = Math.max(0, Math.min(normalized.playerXp, xpNeeded(normalized.playerLevel) - 1));
+  normalized.attackPoints = Math.max(0, Math.floor(normalized.attackPoints));
+  normalized.healthPoints = Math.max(0, Math.floor(normalized.healthPoints));
+  const earned = earnedStatPoints(normalized);
+  if (normalized.attackPoints + normalized.healthPoints > earned) {
+    normalized.healthPoints = Math.min(normalized.healthPoints, earned);
+    normalized.attackPoints = Math.min(normalized.attackPoints, earned - normalized.healthPoints);
+  }
+  normalized.highestFloor = Math.max(1, Math.floor(normalized.highestFloor));
+  normalized.selectedFloor = Math.max(1, Math.min(normalized.highestFloor, Math.floor(normalized.selectedFloor)));
+  return resetCombat(normalized);
 }
 
 export function saveableState(state: GameState): GameState {

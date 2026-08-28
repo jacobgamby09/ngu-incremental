@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Dumbbell,
-  Gem,
   Heart,
   Minus,
   Play,
@@ -19,18 +18,14 @@ import {
   Square,
   Swords,
   Trophy,
-  Zap,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  POWER_UPGRADE_AMOUNT,
-  POWER_UPGRADE_COST,
   SAVE_KEY,
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
-  buyTrainingPower,
   enemyForFloor,
   initialGameState,
   loadGame,
@@ -58,7 +53,6 @@ type Action =
   | { type: 'train'; seconds: number }
   | { type: 'allocate-point'; kind: StatKind }
   | { type: 'return-point'; kind: StatKind }
-  | { type: 'buy-power' }
   | { type: 'select-floor'; floor: number }
   | { type: 'start-combat' }
   | { type: 'combat-tick'; playerDamage: number; enemyDamage: number }
@@ -74,8 +68,6 @@ function reducer(state: GameState, action: Action): GameState {
       return allocateStatPoint(state, action.kind);
     case 'return-point':
       return returnStatPoint(state, action.kind);
-    case 'buy-power':
-      return buyTrainingPower(state);
     case 'select-floor': {
       if (state.combat.status === 'fighting') return state;
       const selectedFloor = Math.max(1, Math.min(state.highestFloor, action.floor));
@@ -112,8 +104,8 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
           <div className="rate"><span>Each point</span><strong>{isAttack ? '+3' : '+10'}<small> {isAttack ? 'MAX DMG' : 'HP'}</small></strong></div>
         </div>
         <div className="point-controls">
-          <button type="button" className="point-button return-point" disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /> Return</button>
-          <button type="button" className="point-button allocate-point" disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /> Allocate</button>
+          <button type="button" className="point-button return-point" aria-label={`Remove one ${kind} point`} disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /></button>
+          <button type="button" className="point-button allocate-point" aria-label={`Add one ${kind} point`} disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /></button>
         </div>
       </CardContent>
     </Card>
@@ -122,7 +114,6 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
 
 function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React.Dispatch<Action> }) {
   const stats = playerStats(state);
-  const canBuy = state.essence >= POWER_UPGRADE_COST;
   const requiredXp = xpNeeded(state.playerLevel);
   const levelProgress = state.playerXp / requiredXp * 100;
   const available = availableStatPoints(state);
@@ -137,7 +128,6 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
       <section className="player-summary" aria-labelledby="player-heading">
         <div className="section-heading">
           <div><p className="eyebrow">Player</p><h2 id="player-heading">The Wanderer</h2></div>
-          <div className="xp-pill"><Gem aria-hidden="true" /><span>{state.essence} Essence</span></div>
         </div>
         <div className="summary-grid">
           <div><Swords aria-hidden="true" /><span>ATK +{state.attackPoints}</span><strong>{stats.minDamage}–{stats.maxDamage}</strong></div>
@@ -163,25 +153,10 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
         </CardContent>
       </Card>
 
-      <Card className="power-card">
-        <CardHeader>
-          <div className="power-heading">
-            <div><p className="eyebrow">Training power</p><CardTitle>Power fuels every second</CardTitle></div>
-            <Zap aria-hidden="true" />
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div><div className="power-value">{state.trainingPower}</div><p className="power-caption">TOTAL POWER</p></div>
-          <button className="power-button" type="button" disabled={!canBuy} onClick={() => dispatch({ type: 'buy-power' })}>
-            <span>Increase power</span><strong>+{POWER_UPGRADE_AMOUNT}</strong><small>{POWER_UPGRADE_COST} ESS</small>
-          </button>
-        </CardContent>
-      </Card>
-
       <div className="allocation-intro"><div><p className="eyebrow">Stat allocation</p><h2>Build your fighter</h2></div><span>Free respec</span></div>
       <StatCard kind="attack" state={state} dispatch={dispatch} />
       <StatCard kind="health" state={state} dispatch={dispatch} />
-      <p className="training-note"><Zap aria-hidden="true" /> Training earns player XP automatically. Points can always be moved for free.</p>
+      <p className="training-note"><Activity aria-hidden="true" /> Training earns player XP automatically. Points can always be moved for free.</p>
     </div>
   );
 }
@@ -235,11 +210,11 @@ function DungeonScreen({ state, dispatch }: { state: GameState; dispatch: React.
       <section className="combat-controls" aria-label="Dungeon controls">
         <div className="floor-selector">
           <button className="floor-button" type="button" aria-label="Previous floor" disabled={!canGoDown} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor - 1 })}><ChevronLeft /></button>
-          <div><span>Selected floor</span><strong>{state.selectedFloor}</strong><small>{enemy.xpReward} XP · {enemy.essenceReward} Essence</small></div>
+          <div><span>Selected floor</span><strong>{state.selectedFloor}</strong><small>{enemy.xpReward} XP</small></div>
           <button className="floor-button" type="button" aria-label="Next floor" disabled={!canGoUp} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor + 1 })}><ChevronRight /></button>
         </div>
 
-        {state.combat.status === 'victory' && <div className="result-banner victory"><Trophy aria-hidden="true" /><span>Floor cleared</span><strong>+{enemy.xpReward} XP · +{enemy.essenceReward} ESS</strong></div>}
+        {state.combat.status === 'victory' && <div className="result-banner victory"><Trophy aria-hidden="true" /><span>Floor cleared</span><strong>+{enemy.xpReward} XP</strong></div>}
         {state.combat.status === 'defeat' && <div className="result-banner defeat"><Skull aria-hidden="true" /><span>Defeated</span><strong>Train and return</strong></div>}
 
         <button type="button" className={`combat-button ${fighting ? 'stop-button' : ''}`} onClick={() => dispatch({ type: fighting ? 'reset-combat' : 'start-combat' })}>
