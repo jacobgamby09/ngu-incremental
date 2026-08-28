@@ -8,11 +8,11 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 export const metadata: Metadata = {
   metadataBase: new URL('https://ngu-incremental.vercel.app'),
   title: 'Ironbound — Incremental RPG',
-  description: 'Train your power, challenge the dungeon, and climb floor by floor.',
+  description: 'Gain levels, shape your build, and climb the dungeon floor by floor.',
   alternates: { canonical: '/' },
   openGraph: {
     title: 'Ironbound — Incremental RPG',
-    description: 'Train your power, challenge the dungeon, and climb floor by floor.',
+    description: 'Gain levels, shape your build, and climb the dungeon floor by floor.',
     type: 'website',
     url: '/',
     images: [{ url: '/og.png', width: 1672, height: 909, alt: 'Ironbound — Train. Descend. Ascend.' }],
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: 'Ironbound — Incremental RPG',
-    description: 'Train your power, challenge the dungeon, and climb floor by floor.',
+    description: 'Gain levels, shape your build, and climb the dungeon floor by floor.',
     images: ['/og.png'],
   },
 };
