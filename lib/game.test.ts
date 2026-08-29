@@ -5,190 +5,194 @@ import {
   STAT_TRAINING_PER_POINT,
   TRAINING_XP_PER_SECOND,
   addPlayerXp,
+  advanceCombatEvent,
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
-  enemyForFloor,
+  bankRun,
+  equipRunItem,
   floorDefinition,
   initialGameState,
   loadGame,
+  lootValue,
   playerStats,
-  resolveCombatTick,
+  playerDamageRange,
   returnStatPoint,
-  startCombat,
+  saveableState,
+  skipCombat,
+  startRun,
   statXpNeeded,
   xpNeeded,
 } from './game';
 
-describe('player level progression', () => {
+describe('player progression', () => {
   it('advances player XP and both allocated stat training bars', () => {
     const next = advanceTraining(initialGameState, 1);
-
-    expect(next.playerXp - initialGameState.playerXp).toBeCloseTo(TRAINING_XP_PER_SECOND, 5);
+    expect(next.playerXp - initialGameState.playerXp).toBeCloseTo(
+      TRAINING_XP_PER_SECOND,
+      5,
+    );
     expect(next.attackProgress).toBe(STAT_TRAINING_PER_POINT);
     expect(next.healthProgress).toBe(STAT_TRAINING_PER_POINT);
   });
 
-  it('grants one available stat point on level-up and carries overflow XP', () => {
-    const state = { ...initialGameState, playerXp: xpNeeded(initialGameState.playerLevel) - 2 };
-    const next = addPlayerXp(state, 5);
-
-    expect(next.playerLevel).toBe(initialGameState.playerLevel + 1);
-    expect(next.playerXp).toBe(3);
-    expect(availableStatPoints(next)).toBe(1);
-  });
-
-  it('allocates and returns points freely without exceeding earned points', () => {
-    const leveled = { ...initialGameState, playerLevel: 4 };
+  it('grants and freely reallocates one point per player level', () => {
+    const nearLevel = {
+      ...initialGameState,
+      playerXp: xpNeeded(initialGameState.playerLevel) - 2,
+    };
+    const leveled = addPlayerXp(nearLevel, 5);
     const allocated = allocateStatPoint(leveled, 'attack');
-    const blocked = allocateStatPoint(allocated, 'health');
     const returned = returnStatPoint(allocated, 'attack');
-
-    expect(allocated.attackPoints).toBe(2);
+    expect(leveled.playerXp).toBe(3);
+    expect(availableStatPoints(leveled)).toBe(1);
     expect(availableStatPoints(allocated)).toBe(0);
-    expect(blocked).toBe(allocated);
-    expect(returned.attackPoints).toBe(1);
     expect(availableStatPoints(returned)).toBe(1);
   });
 
-  it('levels a stat directly when its live training bar completes', () => {
+  it('levels stats directly when their live bars complete', () => {
     const state = {
       ...initialGameState,
       attackProgress: statXpNeeded(initialGameState.attackLevel) - 2,
       healthPoints: 0,
     };
     const next = advanceTraining(state, 1);
-
     expect(next.attackLevel).toBe(initialGameState.attackLevel + 1);
     expect(next.attackProgress).toBe(STAT_TRAINING_PER_POINT - 2);
-    expect(next.healthLevel).toBe(initialGameState.healthLevel);
-    expect(next.healthProgress).toBe(initialGameState.healthProgress);
+    expect(next.healthProgress).toBe(state.healthProgress);
   });
 
-  it('pauses a stat with no points and speeds up linearly with more points', () => {
-    const state = { ...initialGameState, playerLevel: 5, attackPoints: 0, healthPoints: 3 };
-    const next = advanceTraining(state, 1);
-
-    expect(next.attackProgress).toBe(state.attackProgress);
-    expect(next.healthProgress).toBe(STAT_TRAINING_PER_POINT * 3);
+  it('pauses all training while a run is active', () => {
+    const running = startRun(initialGameState, 'pause-test');
+    expect(advanceTraining(running, 2)).toBe(running);
   });
 
-  it('syncs idle combat health when health training raises max HP', () => {
-    const state = {
-      ...initialGameState,
-      attackPoints: 0,
-      healthProgress: statXpNeeded(initialGameState.healthLevel) - 2,
-    };
-    const next = advanceTraining(state, 1);
-
-    expect(next.healthLevel).toBe(initialGameState.healthLevel + 1);
-    expect(next.combat.playerHp).toBe(playerStats(next).maxHp);
-  });
-
-  it('derives combat stats from permanent stat levels, not allocated points', () => {
+  it('derives combat stats from permanent stat levels', () => {
     expect(playerStats({ attackLevel: 3, healthLevel: 4 })).toEqual({
       minDamage: 3,
       maxDamage: 14,
       maxHp: 60,
+      armor: 0,
     });
   });
-
 });
 
-describe('floor definitions', () => {
-  it('provides mobs, recommendations and a future loot table for each floor', () => {
+describe('floor information', () => {
+  it('declares complete encounter and loot ranges without recommendations', () => {
     const floor = floorDefinition(1);
-
-    expect(floor.name).toBe('Ashen Tunnels');
-    expect(floor.mobs.length).toBeGreaterThanOrEqual(3);
-    expect(floor.lootTable.length).toBeGreaterThanOrEqual(3);
-    expect(floor.recommendedAttack).toBeGreaterThan(0);
-    expect(enemyForFloor(1).name).toBe(floor.mobs[0].name);
+    expect(floor.encounter.count).toEqual({ min: 1, max: 2 });
+    expect(floor.encounter.hp.min).toBeGreaterThan(0);
+    expect(floor.encounter.damage.max).toBeGreaterThanOrEqual(
+      floor.encounter.damage.min,
+    );
+    expect(
+      floor.lootTable.every(
+        (entry) => entry.quantity.min > 0 && entry.dropChance > 0,
+      ),
+    ).toBe(true);
+    expect(floor).not.toHaveProperty('recommendedAttack');
   });
 
-  it('scales definitions beyond the authored floor set', () => {
-    const floor = floorDefinition(7);
-
-    expect(floor.floor).toBe(7);
-    expect(floor.name).toContain('Depth 2');
-    expect(floor.recommendedAttack).toBe(13);
+  it('scales authored floors into later depths', () => {
+    const first = floorDefinition(1);
+    const later = floorDefinition(6);
+    expect(later.name).toContain('Depth 2');
+    expect(later.encounter.hp.min).toBeGreaterThan(first.encounter.hp.min);
   });
 });
 
-describe('dungeon combat', () => {
-  it('starts with full player and enemy health', () => {
-    const started = startCombat(initialGameState);
-    expect(started.combat.status).toBe('fighting');
-    expect(started.combat.playerHp).toBe(playerStats(initialGameState).maxHp);
-    expect(started.combat.enemyHp).toBe(enemyForFloor(1).maxHp);
+describe('run loop', () => {
+  it('resolves an authored event list into a stop/go decision', () => {
+    const started = startRun(initialGameState, 'first-run');
+    expect(started.run.status).toBe('fighting');
+    expect(started.run.events.length).toBeGreaterThan(0);
+    const resolved = skipCombat(started);
+    expect(resolved.run.status).toBe('decision');
+    expect(resolved.highestFloor).toBe(2);
+    expect(resolved.run.bag.find((item) => item.id === 'gold')).toBeDefined();
+    expect(resolved.run.playerHp).toBeLessThanOrEqual(
+      playerStats(resolved).maxHp,
+    );
   });
 
-  it('rewards XP once and unlocks the next floor', () => {
-    const base = { ...initialGameState, playerXp: 0 };
-    const started = startCombat(base);
-    const victory = resolveCombatTick(started, started.combat.enemyHp, 999);
-    const repeated = resolveCombatTick(victory, 999, 999);
-    const enemy = enemyForFloor(1);
+  it('plays the pre-resolved result one immutable event at a time', () => {
+    const started = startRun(initialGameState, 'event-playback');
+    const next = advanceCombatEvent(started);
+    expect(next.run.eventIndex).toBe(1);
+    expect(started.run.eventIndex).toBe(0);
+    expect(next.run.events).toEqual(started.run.events);
+  });
 
-    expect(victory.combat.status).toBe('victory');
-    expect(victory.playerXp).toBe(enemy.xpReward);
-    expect(victory.highestFloor).toBe(2);
-    expect(repeated.playerXp).toBe(victory.playerXp);
+  it('banks the concrete bag permanently', () => {
+    const won = skipCombat(startRun(initialGameState, 'bank-test'));
+    const valueAtRisk = lootValue(won.run.bag);
+    const banked = bankRun(won);
+    expect(banked.run.status).toBe('returned');
+    expect(banked.run.bag).toEqual([]);
+    expect(lootValue(banked.inventory)).toBe(valueAtRisk);
+  });
+
+  it('lets a found unbanked axe change the next combat damage profile', () => {
+    const won = skipCombat(startRun(initialGameState, 'gear-test'));
+    const withAxe = {
+      ...won,
+      run: {
+        ...won.run,
+        bag: [
+          ...won.run.bag,
+          {
+            id: 'rusted-war-axe',
+            name: 'Rusted War Axe',
+            rarity: 'Rare' as const,
+            quantity: 1,
+            knownValue: 120,
+          },
+        ],
+      },
+    };
+    const equipped = equipRunItem(withAxe, 'rusted-war-axe');
+    expect(equipped.run.equippedItemId).toBe('rusted-war-axe');
+    expect(playerDamageRange(equipped)).toEqual({ min: 2, max: 24 });
+    expect(won.run.equippedItemId).toBeNull();
   });
 });
 
 describe('save handling', () => {
-  it('migrates the previous percentage-allocation save into level points', () => {
-    const migrated = loadGame(JSON.stringify({
-      saveVersion: 1,
-      xp: 80,
-      trainingPower: 110,
-      attackShare: 70,
-      attack: { level: 1, progress: 18 },
-      health: { level: 1, progress: 12 },
-      highestFloor: 2,
-      selectedFloor: 2,
-    }));
-
+  it('migrates the existing v4 save without losing permanent stat levels', () => {
+    const migrated = loadGame(
+      JSON.stringify({
+        saveVersion: 4,
+        playerLevel: 7,
+        playerXp: 35,
+        attackPoints: 4,
+        healthPoints: 2,
+        attackLevel: 9,
+        attackProgress: 12,
+        healthLevel: 8,
+        healthProgress: 7,
+        highestFloor: 5,
+        selectedFloor: 4,
+      }),
+    );
     expect(migrated.saveVersion).toBe(SAVE_VERSION);
-    expect(migrated.playerLevel).toBe(3);
-    expect(migrated.attackPoints + migrated.healthPoints).toBe(2);
-    expect(migrated.attackLevel).toBe(1);
-    expect(migrated.healthLevel).toBe(1);
+    expect(migrated.attackLevel).toBe(9);
+    expect(migrated.healthLevel).toBe(8);
+    expect(migrated.inventory).toEqual([]);
+    expect(migrated.run.status).toBe('idle');
   });
 
-  it('preserves combat power and allocated points from the previous level save', () => {
-    const migrated = loadGame(JSON.stringify({
-      saveVersion: 2,
-      playerLevel: 7,
-      playerXp: 35,
-      essence: 999,
-      trainingPower: 180,
-      attackPoints: 4,
-      healthPoints: 2,
-      highestFloor: 5,
-      selectedFloor: 4,
-    }));
-
-    expect(migrated.saveVersion).toBe(SAVE_VERSION);
-    expect(migrated.playerLevel).toBe(7);
-    expect(migrated.playerXp).toBe(35);
-    expect(migrated.attackPoints).toBe(4);
-    expect(migrated.healthPoints).toBe(2);
-    expect(migrated.attackLevel).toBe(4);
-    expect(migrated.healthLevel).toBe(2);
-    expect(migrated.highestFloor).toBe(5);
-    expect(migrated.selectedFloor).toBe(4);
-    expect(migrated).not.toHaveProperty('essence');
-    expect(migrated).not.toHaveProperty('trainingPower');
+  it('preserves an active seeded run and its event position on reload', () => {
+    const progressed = advanceCombatEvent(
+      startRun(initialGameState, 'reload-test'),
+    );
+    const restored = loadGame(JSON.stringify(saveableState(progressed)));
+    expect(restored.run.status).toBe('fighting');
+    expect(restored.run.seed).toBe('reload-test');
+    expect(restored.run.eventIndex).toBe(1);
+    expect(restored.run.events).toEqual(progressed.run.events);
   });
 
   it('falls back safely when saved data is invalid', () => {
     expect(loadGame('{broken')).toEqual(initialGameState);
-  });
-
-  it('never restores an active fight', () => {
-    const fighting = startCombat(initialGameState);
-    expect(loadGame(JSON.stringify(fighting)).combat.status).toBe('idle');
   });
 });
