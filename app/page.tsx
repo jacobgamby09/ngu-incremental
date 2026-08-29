@@ -131,6 +131,7 @@ function StatCard({
   dispatch: React.Dispatch<Action>;
 }) {
   const isAttack = kind === 'attack';
+  const label = isAttack ? 'ATK' : 'HP';
   const points = isAttack ? state.attackPoints : state.healthPoints;
   const level = isAttack ? state.attackLevel : state.healthLevel;
   const progress = isAttack ? state.attackProgress : state.healthProgress;
@@ -141,14 +142,14 @@ function StatCard({
       <CardContent>
         <div className="compact-stat-heading">
           <div className="compact-stat-title">
-            <strong>{isAttack ? 'Attack' : 'Health'}</strong>
+            <strong>{label}</strong>
             <span>Level {level}</span>
           </div>
           <div className="point-controls">
             <button
               type="button"
               className="point-button return-point"
-              aria-label={`Remove one ${kind} point`}
+              aria-label={`Remove one ${label} skill point`}
               disabled={points === 0}
               onClick={() => dispatch({ type: 'return-point', kind })}
             >
@@ -157,7 +158,7 @@ function StatCard({
             <button
               type="button"
               className="point-button allocate-point"
-              aria-label={`Add one ${kind} point`}
+              aria-label={`Add one ${label} skill point`}
               disabled={availableStatPoints(state) === 0}
               onClick={() => dispatch({ type: 'allocate-point', kind })}
             >
@@ -166,7 +167,7 @@ function StatCard({
           </div>
         </div>
         <GameProgress
-          label={`${isAttack ? 'Attack' : 'Health'} progress to level ${level + 1}`}
+          label={`${label} progress to level ${level + 1}`}
           value={(progress / required) * 100}
         />
       </CardContent>

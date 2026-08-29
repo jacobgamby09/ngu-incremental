@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   SAVE_VERSION,
   STAT_TRAINING_PER_POINT,
-  TRAINING_XP_PER_SECOND,
   addPlayerXp,
   advanceCombatEvent,
   advanceTraining,
@@ -26,12 +25,10 @@ import {
 } from './game';
 
 describe('player progression', () => {
-  it('advances player XP and both allocated stat training bars', () => {
+  it('advances both stat bars without granting player XP', () => {
     const next = advanceTraining(initialGameState, 1);
-    expect(next.playerXp - initialGameState.playerXp).toBeCloseTo(
-      TRAINING_XP_PER_SECOND,
-      5,
-    );
+    expect(next.playerXp).toBe(initialGameState.playerXp);
+    expect(next.playerLevel).toBe(initialGameState.playerLevel);
     expect(next.attackProgress).toBe(STAT_TRAINING_PER_POINT);
     expect(next.healthProgress).toBe(STAT_TRAINING_PER_POINT);
   });
@@ -120,6 +117,7 @@ describe('run loop', () => {
     expect(resolved.run.playerHp).toBeLessThanOrEqual(
       playerStats(resolved).maxHp,
     );
+    expect(resolved.playerXp).toBeGreaterThan(initialGameState.playerXp);
   });
 
   it('plays the pre-resolved result one immutable event at a time', () => {

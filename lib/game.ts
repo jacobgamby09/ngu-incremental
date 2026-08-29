@@ -17,7 +17,6 @@ export type {
 
 export const SAVE_KEY = 'ironbound-save-v1';
 export const SAVE_VERSION = 5;
-export const TRAINING_XP_PER_SECOND = 4;
 export const STAT_TRAINING_PER_POINT = 9;
 
 export type StatKind = 'attack' | 'health';
@@ -192,16 +191,13 @@ export function advanceTraining(state: GameState, seconds: number): GameState {
     state.healthPoints,
     elapsed,
   );
-  const trained = addPlayerXp(
-    {
-      ...state,
-      attackLevel: attack.level,
-      attackProgress: attack.progress,
-      healthLevel: health.level,
-      healthProgress: health.progress,
-    },
-    TRAINING_XP_PER_SECOND * elapsed,
-  );
+  const trained = {
+    ...state,
+    attackLevel: attack.level,
+    attackProgress: attack.progress,
+    healthLevel: health.level,
+    healthProgress: health.progress,
+  };
   return resetCombat(trained);
 }
 

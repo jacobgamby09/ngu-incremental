@@ -1,6 +1,8 @@
 # GDD — Dungeon-incremental
 
-Version 0.3 · 28. august 2026 · foreløbig
+Version 0.4 · levende dokument · senest opdateret 29. august 2026
+
+Dette dokument er projektets løbende **source of truth** for gameplayregler og tekniske løfter. Nye beslutninger skrives ind, når de aftales. Hvis to formuleringer er i konflikt, gælder den senest daterede **[LÅST]**-beslutning i beslutningsloggen, og det ældre afsnit skal rettes i samme ændring.
 
 Statusmarkering:
 
@@ -9,7 +11,39 @@ Statusmarkering:
 - **[ÅBEN]** = uafklaret
 - **[UDSKUDT]** = bevidst gemt til efter kerneloopet er bevist
 
-Arbejdstitlen er fortsat åben. Prototypen hedder "Dybet", men navnet kolliderer med *The Deep*. Kandidater: **Sækken**, **Nedstigning** eller en kombination. **[ÅBEN]**
+## 0. Aktuelt regelgrundlag
+
+### Player Level og træning [LÅST]
+
+- Player Level XP kommer kun fra belønninger i Dungeon.
+- Træning giver aldrig Player Level XP.
+- Hvert Player Level efter level 1 giver ét skill point.
+- Skill points kan frit og øjeblikkeligt flyttes mellem stats.
+- Allokerede skill points bestemmer træningshastigheden for den valgte stat.
+- ATK og HP har hver sin kontinuerlige progressbar. Når baren fyldes, stiger den pågældende stat direkte ét level.
+- ATK- og HP-træning fortsætter, mens et Dungeon-run er aktivt.
+- Reallokering påvirker kun fremtidig træningshastighed. Opnåede stat-levels og progress mistes aldrig.
+
+### Training UI [LÅST]
+
+- Stats navngives **ATK** og **HP**.
+- Toppen viser kun Player Level og Deepest Floor.
+- Unspent Skill Points vises i en separat boks.
+- Hver stat vises som en kompakt række med navn, level, progressbar og `− / +`.
+- Allokerede point, afledte kampværdier og træningshastighed skjules på den kompakte Training-skærm.
+- `+` skal se disabled ud og være inaktiv, når spilleren ikke har unspent skill points.
+
+### Beslutningslog
+
+| Dato            | Status | Beslutning                                                           |
+| --------------- | ------ | -------------------------------------------------------------------- |
+| 29. august 2026 | [LÅST] | Player Level XP kommer fra Dungeon og aldrig fra træning.            |
+| 29. august 2026 | [LÅST] | Stats hedder ATK og HP.                                              |
+| 29. august 2026 | [LÅST] | Skill points kan frit reallokeres og styrer stat-træningshastighed.  |
+| 29. august 2026 | [LÅST] | ATK og HP leveler direkte gennem hver sin kontinuerlige progressbar. |
+| 29. august 2026 | [LÅST] | Training-skærmen bruger kompakte, skalerbare stat-rækker.            |
+
+Arbejdstitlen er fortsat åben. Prototypen hedder "Dybet", men navnet kolliderer med _The Deep_. Kandidater: **Sækken**, **Nedstigning** eller en kombination. **[ÅBEN]**
 
 ---
 
@@ -272,29 +306,34 @@ Mekanikken implementeres ikke, før tabets nuværende styrke er testet.
 
 ## 7. Lejren
 
-### 7.1 Træning [LÅST i retning]
+### 7.1 Træning [LÅST]
 
-Spillet begynder med manuel træning af ATK og HP ved en target dummy.
+ATK og HP trænes kontinuerligt gennem hver sin progressbar. Skill points fra Player Level fordeles mellem stats og bestemmer deres træningshastighed.
 
-Progressionsbuen er:
+- Træning giver stat-progress, ikke Player Level XP.
+- Player Level XP kommer fra Dungeon.
+- En fyldt stat-bar leveler den pågældende stat direkte.
+- Skill points kan omfordeles gratis og øjeblikkeligt.
+- Opnåede levels og eksisterende progress regredierer aldrig ved reallokering.
+- Træningen fortsætter under aktive Dungeon-runs.
 
-1. Manuel klik-træning
-2. Køb af auto-træning
-3. Fokusfordeling mellem stats
-4. Multipliers inden for det aktuelle bossloft
-5. Nye stats og træningsspor
+Den videre progressionsretning er:
 
-Fokus kan omfordeles gratis og øjeblikkeligt. Beslutningen er, hvad der trænes, ikke hvornår spilleren får lov til at skifte mening.
+1. Kontinuerlig træning af ATK og HP.
+2. Fri fokusfordeling gennem skill points.
+3. Bossbaserede træningslofter.
+4. Multipliers inden for det aktuelle bossloft.
+5. Nye stats og træningsspor.
 
 ### 7.2 Stats [RETNING]
 
-| Stat | Funktion |
-|---|---|
-| ATK | Hurtigere kills og dermed kortere eksponering |
-| HP | Buffer mod varians og samlet attrition |
-| Rustning | Flad reduktion og læsbare breakpoints |
-| Regen | Heling mellem etager; bekæmper attrition uden at fjerne den |
-| Crit | Overkill spilder videre; stærk mod sværme og mere swingy mod store mål |
+| Stat     | Funktion                                                               |
+| -------- | ---------------------------------------------------------------------- |
+| ATK      | Hurtigere kills og dermed kortere eksponering                          |
+| HP       | Buffer mod varians og samlet attrition                                 |
+| Rustning | Flad reduktion og læsbare breakpoints                                  |
+| Regen    | Heling mellem etager; bekæmper attrition uden at fjerne den            |
+| Crit     | Overkill spilder videre; stærk mod sværme og mere swingy mod store mål |
 
 ### Regen-reglen [LÅST]
 
@@ -422,27 +461,22 @@ Hvert system skal ankomme som svar på et problem, spilleren allerede har opleve
 
 ## 9. Teknisk arkitektur [LÅST i retning]
 
-Stack: Vite, React, TypeScript og Zustand.
+Aktuel stack: Next.js 16, React og TypeScript. Lokal state håndteres foreløbigt med en reducer og et versioneret localStorage-save. Et separat state-bibliotek indføres kun, hvis kompleksiteten kræver det.
 
 Motoren er ren TypeScript uden React eller DOM:
 
 ```text
-src/
+app/
+  page.tsx
+  globals.css
+lib/
+  game.ts
   engine/
-    config.ts
     rng.ts
     combat.ts
     floors.ts
     loot.ts
-    run.ts
-    sim.ts
-  state/
-    store.ts
-  ui/
-    camp/
-    depths/
-    combat/
-    shared/
+    types.ts
 ```
 
 ### Tekniske krav
@@ -483,13 +517,11 @@ Formålet er ikke at optimere spilleren, men at se, om mellemzonen faktisk produ
 6. Ét fundet mid-run-våben med stabil/swingy tradeoff.
 7. Feel-test og rekalibrering.
 
-### v2.5 — lejrens idle-loop
+### v2.5 — lejrens udvidede idle-loop
 
-1. Auto-træning.
-2. Fokusvælger.
-3. Bossbaserede træningslofter.
-4. Offline-progression.
-5. Simple ekspeditioner til gamle materialer.
+1. Bossbaserede træningslofter.
+2. Offline-progression.
+3. Simple ekspeditioner til gamle materialer.
 
 ### v3 — builds og smedning
 
