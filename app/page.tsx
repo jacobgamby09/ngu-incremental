@@ -26,6 +26,7 @@ import {
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
+  earnedStatPoints,
   enemyForFloor,
   initialGameState,
   loadGame,
@@ -86,6 +87,7 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
   const isAttack = kind === 'attack';
   const points = isAttack ? state.attackPoints : state.healthPoints;
   const available = availableStatPoints(state);
+  const earned = earnedStatPoints(state);
   const derived = playerStats(state);
   const Icon = isAttack ? Swords : Heart;
 
@@ -103,6 +105,8 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
           <div><span>{isAttack ? 'Damage' : 'Max health'}</span><strong>{isAttack ? `${derived.minDamage}–${derived.maxDamage}` : derived.maxHp}</strong></div>
           <div className="rate"><span>Each point</span><strong>{isAttack ? '+3' : '+10'}<small> {isAttack ? 'MAX DMG' : 'HP'}</small></strong></div>
         </div>
+        <div className="progress-copy stat-progress-copy"><span>Allocated points</span><strong>{points} / {earned}</strong></div>
+        <GameProgress label={`${isAttack ? 'Attack' : 'Health'} point allocation`} value={earned === 0 ? 0 : points / earned * 100} />
         <div className="point-controls">
           <button type="button" className="point-button return-point" aria-label={`Remove one ${kind} point`} disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /></button>
           <button type="button" className="point-button allocate-point" aria-label={`Add one ${kind} point`} disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /></button>
