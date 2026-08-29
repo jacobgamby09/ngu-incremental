@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { canFloorDamagePlayer, resolveCombat } from './combat';
 import { floorDefinition } from './floors';
-import { resolveLoot } from './loot';
 import { createRng } from './rng';
 
 describe('seeded RNG', () => {
@@ -36,7 +35,7 @@ describe('combat engine', () => {
     expect(resolveCombat(input)).toEqual(resolveCombat(input));
   });
 
-  it('always lets the player attack before surviving enemies answer', () => {
+  it('always lets the player attack before the enemy answers', () => {
     const result = resolveCombat({
       seed: 'turn-order',
       player,
@@ -49,7 +48,7 @@ describe('combat engine', () => {
     expect(firstEnemyAttack).toBeGreaterThan(0);
   });
 
-  it('distinguishes provably harmless floors from floors that can deal damage', () => {
+  it('distinguishes harmless enemies from enemies that can deal damage', () => {
     const floor = floorDefinition(1);
     expect(
       canFloorDamagePlayer(
@@ -59,21 +58,11 @@ describe('combat engine', () => {
     ).toBe(false);
     expect(canFloorDamagePlayer(player, floor)).toBe(true);
   });
-});
 
-describe('loot engine', () => {
-  it('resolves concrete drops deterministically and within declared ranges', () => {
-    const floor = floorDefinition(3);
-    const first = resolveLoot('loot-seed', floor);
-    expect(first).toEqual(resolveLoot('loot-seed', floor));
-    for (const drop of first) {
-      const declaration = floor.lootTable.find((entry) => entry.id === drop.id);
-      expect(drop.quantity).toBeGreaterThanOrEqual(
-        declaration?.quantity.min ?? 0,
-      );
-      expect(drop.quantity).toBeLessThanOrEqual(
-        declaration?.quantity.max ?? Number.POSITIVE_INFINITY,
-      );
-    }
+  it('scales enemies and XP beyond the authored floors', () => {
+    const first = floorDefinition(1);
+    const later = floorDefinition(6);
+    expect(later.encounter.hp.min).toBeGreaterThan(first.encounter.hp.min);
+    expect(later.xpReward).toBeGreaterThan(first.xpReward);
   });
 });

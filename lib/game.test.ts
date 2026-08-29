@@ -8,21 +8,25 @@ import {
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
-  bankRun,
-  equipRunItem,
-  floorDefinition,
   initialGameState,
   loadGame,
-  lootValue,
   playerStats,
-  playerDamageRange,
   returnStatPoint,
   saveableState,
-  skipCombat,
   startRun,
   statXpNeeded,
   xpNeeded,
+  type GameState,
 } from './game';
+
+function finishRun(state: GameState) {
+  let next = state;
+  for (let event = 0; event < 20_000; event += 1) {
+    if (next.run.status === 'results') return next;
+    next = advanceCombatEvent(next);
+  }
+  throw new Error('Run did not finish');
+}
 
 describe('player progression', () => {
   it('advances both stat bars without granting player XP', () => {
@@ -59,7 +63,7 @@ describe('player progression', () => {
     expect(next.healthProgress).toBe(state.healthProgress);
   });
 
-  it('continues live stat progress while a run is active', () => {
+  it('continues live stat progress while combat is active', () => {
     const running = startRun(initialGameState, 'active-training-test');
     const next = advanceTraining(running, 1);
     expect(next.attackProgress - running.attackProgress).toBe(
@@ -81,92 +85,68 @@ describe('player progression', () => {
   });
 });
 
-describe('floor information', () => {
-  it('declares complete encounter and loot ranges without recommendations', () => {
-    const floor = floorDefinition(1);
-    expect(floor.encounter.count).toEqual({ min: 1, max: 2 });
-    expect(floor.encounter.hp.min).toBeGreaterThan(0);
-    expect(floor.encounter.damage.max).toBeGreaterThanOrEqual(
-      floor.encounter.damage.min,
-    );
-    expect(
-      floor.lootTable.every(
-        (entry) => entry.quantity.min > 0 && entry.dropChance > 0,
-      ),
-    ).toBe(true);
-    expect(floor).not.toHaveProperty('recommendedAttack');
-  });
-
-  it('scales authored floors into later depths', () => {
-    const first = floorDefinition(1);
-    const later = floorDefinition(6);
-    expect(later.name).toContain('Depth 2');
-    expect(later.encounter.hp.min).toBeGreaterThan(first.encounter.hp.min);
-  });
-});
-
-describe('run loop', () => {
-  it('resolves an authored event list into a stop/go decision', () => {
+describe('automatic dungeon run', () => {
+  it('always starts directly in combat on floor 1', () => {
     const started = startRun(initialGameState, 'first-run');
     expect(started.run.status).toBe('fighting');
+    expect(started.run.floor).toBe(1);
+    expect(started.combat.status).toBe('fighting');
     expect(started.run.events.length).toBeGreaterThan(0);
-    const resolved = skipCombat(started);
-    expect(resolved.run.status).toBe('decision');
-    expect(resolved.highestFloor).toBe(2);
-    expect(resolved.run.bag.find((item) => item.id === 'gold')).toBeDefined();
-    expect(resolved.run.playerHp).toBeLessThanOrEqual(
-      playerStats(resolved).maxHp,
-    );
-    expect(resolved.playerXp).toBeGreaterThan(initialGameState.playerXp);
   });
 
-  it('plays the pre-resolved result one immutable event at a time', () => {
-    const started = startRun(initialGameState, 'event-playback');
-    const next = advanceCombatEvent(started);
-    expect(next.run.eventIndex).toBe(1);
-    expect(started.run.eventIndex).toBe(0);
-    expect(next.run.events).toEqual(started.run.events);
-  });
-
-  it('banks the concrete bag permanently', () => {
-    const won = skipCombat(startRun(initialGameState, 'bank-test'));
-    const valueAtRisk = lootValue(won.run.bag);
-    const banked = bankRun(won);
-    expect(banked.run.status).toBe('returned');
-    expect(banked.run.bag).toEqual([]);
-    expect(lootValue(banked.inventory)).toBe(valueAtRisk);
-  });
-
-  it('lets a found unbanked axe change the next combat damage profile', () => {
-    const won = skipCombat(startRun(initialGameState, 'gear-test'));
-    const withAxe = {
-      ...won,
-      run: {
-        ...won.run,
-        bag: [
-          ...won.run.bag,
-          {
-            id: 'rusted-war-axe',
-            name: 'Rusted War Axe',
-            rarity: 'Rare' as const,
-            quantity: 1,
-            knownValue: 120,
-          },
-        ],
+  it('continues automatically after a victory with remaining HP', () => {
+    let state = startRun(
+      {
+        ...initialGameState,
+        attackLevel: 20,
+        healthLevel: 20,
       },
+      'auto-next-floor',
+    );
+    const startingHp = state.run.playerHp;
+    while (state.run.floor === 1) state = advanceCombatEvent(state);
+    expect(state.run.status).toBe('fighting');
+    expect(state.run.floor).toBe(2);
+    expect(state.run.xpGained).toBeGreaterThan(0);
+    expect(state.run.playerHp).toBeLessThanOrEqual(startingHp);
+  });
+
+  it('awards accumulated Dungeon XP only when the run ends', () => {
+    const started = startRun(initialGameState, 'xp-on-death');
+    let progressed = started;
+    while (progressed.run.floor === 1) {
+      progressed = advanceCombatEvent(progressed);
+    }
+    expect(progressed.playerXp).toBe(started.playerXp);
+    expect(progressed.run.xpGained).toBeGreaterThan(0);
+
+    const finished = finishRun(progressed);
+    expect(finished.run.status).toBe('results');
+    expect(finished.playerXp).not.toBe(started.playerXp);
+    expect(finished.run.floor).toBeGreaterThanOrEqual(2);
+    expect(finished.highestFloor).toBeGreaterThanOrEqual(finished.run.floor);
+  });
+
+  it('stores the levels gained for the result overview', () => {
+    const boosted = {
+      ...initialGameState,
+      playerXp: xpNeeded(initialGameState.playerLevel) - 1,
+      attackLevel: 8,
+      healthLevel: 8,
     };
-    const equipped = equipRunItem(withAxe, 'rusted-war-axe');
-    expect(equipped.run.equippedItemId).toBe('rusted-war-axe');
-    expect(playerDamageRange(equipped)).toEqual({ min: 2, max: 24 });
-    expect(won.run.equippedItemId).toBeNull();
+    const finished = finishRun(startRun(boosted, 'level-summary'));
+    expect(finished.run.levelsGained).toBeGreaterThan(0);
+    expect(finished.playerLevel).toBe(
+      finished.run.startingPlayerLevel + finished.run.levelsGained,
+    );
   });
 });
 
 describe('save handling', () => {
-  it('migrates the existing v4 save without losing permanent stat levels', () => {
+  it('migrates the previous save without loot or floor selection state', () => {
     const migrated = loadGame(
       JSON.stringify({
-        saveVersion: 4,
+        saveVersion: 5,
         playerLevel: 7,
         playerXp: 35,
         attackPoints: 4,
@@ -177,13 +157,16 @@ describe('save handling', () => {
         healthProgress: 7,
         highestFloor: 5,
         selectedFloor: 4,
+        inventory: [{ id: 'gold', quantity: 10 }],
       }),
     );
     expect(migrated.saveVersion).toBe(SAVE_VERSION);
     expect(migrated.attackLevel).toBe(9);
     expect(migrated.healthLevel).toBe(8);
-    expect(migrated.inventory).toEqual([]);
+    expect(migrated.highestFloor).toBe(4);
     expect(migrated.run.status).toBe('idle');
+    expect(migrated).not.toHaveProperty('inventory');
+    expect(migrated).not.toHaveProperty('selectedFloor');
   });
 
   it('preserves an active seeded run and its event position on reload', () => {

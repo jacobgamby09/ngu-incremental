@@ -1,38 +1,33 @@
 import { resolveCombat } from './engine/combat';
 import { floorDefinition } from './engine/floors';
-import { mergeLoot, resolveLoot } from './engine/loot';
-import type { CombatEvent, FloorDefinition, LootStack } from './engine/types';
+import type { CombatEvent, IntegerRange } from './engine/types';
 
 export { canFloorDamagePlayer, resolveCombat } from './engine/combat';
 export { floorDefinition } from './engine/floors';
-export { lootValue, mergeLoot, resolveLoot } from './engine/loot';
 export type {
   CombatEvent,
   FloorDefinition,
-  LootEntry,
-  LootRarity,
-  LootStack,
-  MobRole,
+  IntegerRange,
 } from './engine/types';
 
 export const SAVE_KEY = 'ironbound-save-v1';
-export const SAVE_VERSION = 5;
+export const SAVE_VERSION = 6;
 export const STAT_TRAINING_PER_POINT = 9;
 
 export type StatKind = 'attack' | 'health';
-export type RunStatus = 'idle' | 'fighting' | 'decision' | 'dead' | 'returned';
+export type RunStatus = 'idle' | 'fighting' | 'results';
 
 export type CombatState = {
-  status: 'idle' | 'fighting' | 'victory' | 'defeat';
+  status: 'idle' | 'fighting' | 'defeat';
   playerHp: number;
+  playerMaxHp: number;
+  playerDamage: IntegerRange;
   enemyHp: number;
   enemyMaxHp: number;
-  enemyCount: number;
+  enemyDamage: IntegerRange;
   enemyName: string;
-  enemyTitle: string;
   lastPlayerDamage: number | null;
   lastEnemyDamage: number | null;
-  log: string[];
 };
 
 export type RunState = {
@@ -40,11 +35,11 @@ export type RunState = {
   seed: string;
   floor: number;
   playerHp: number;
-  bag: LootStack[];
+  xpGained: number;
+  levelsGained: number;
+  startingPlayerLevel: number;
   events: CombatEvent[];
   eventIndex: number;
-  pendingLoot: LootStack[];
-  equippedItemId: string | null;
 };
 
 export type GameState = {
@@ -58,19 +53,8 @@ export type GameState = {
   healthLevel: number;
   healthProgress: number;
   highestFloor: number;
-  selectedFloor: number;
-  inventory: LootStack[];
   run: RunState;
   combat: CombatState;
-};
-
-export type Enemy = {
-  name: string;
-  title: string;
-  maxHp: number;
-  minDamage: number;
-  maxDamage: number;
-  xpReward: number;
 };
 
 function emptyRun(): RunState {
@@ -79,27 +63,26 @@ function emptyRun(): RunState {
     seed: '',
     floor: 0,
     playerHp: 0,
-    bag: [],
+    xpGained: 0,
+    levelsGained: 0,
+    startingPlayerLevel: 0,
     events: [],
     eventIndex: 0,
-    pendingLoot: [],
-    equippedItemId: null,
   };
 }
 
-function previewCombat(floorNumber: number, playerHp: number): CombatState {
-  const floor = floorDefinition(floorNumber);
+function emptyCombat(maxHp: number, damage: IntegerRange): CombatState {
   return {
     status: 'idle',
-    playerHp,
-    enemyHp: floor.encounter.hp.max * floor.encounter.count.max,
-    enemyMaxHp: floor.encounter.hp.max * floor.encounter.count.max,
-    enemyCount: floor.encounter.count.max,
-    enemyName: floor.encounter.name,
-    enemyTitle: floor.encounter.title,
+    playerHp: maxHp,
+    playerMaxHp: maxHp,
+    playerDamage: damage,
+    enemyHp: 0,
+    enemyMaxHp: 0,
+    enemyDamage: { min: 0, max: 0 },
+    enemyName: '',
     lastPlayerDamage: null,
     lastEnemyDamage: null,
-    log: ['The dungeon waits.'],
   };
 }
 
@@ -114,10 +97,8 @@ export const initialGameState: GameState = {
   healthLevel: 1,
   healthProgress: 0,
   highestFloor: 1,
-  selectedFloor: 1,
-  inventory: [],
   run: emptyRun(),
-  combat: previewCombat(1, 30),
+  combat: emptyCombat(30, { min: 1, max: 8 }),
 };
 
 export function xpNeeded(level: number) {
@@ -173,7 +154,7 @@ function advanceStat(
 }
 
 export function runIsActive(state: Pick<GameState, 'run'>) {
-  return state.run.status === 'fighting' || state.run.status === 'decision';
+  return state.run.status === 'fighting';
 }
 
 export function advanceTraining(state: GameState, seconds: number): GameState {
@@ -191,14 +172,13 @@ export function advanceTraining(state: GameState, seconds: number): GameState {
     state.healthPoints,
     elapsed,
   );
-  const trained = {
+  return {
     ...state,
     attackLevel: attack.level,
     attackProgress: attack.progress,
     healthLevel: health.level,
     healthProgress: health.progress,
   };
-  return resetCombat(trained);
 }
 
 export function allocateStatPoint(state: GameState, kind: StatKind): GameState {
@@ -227,22 +207,9 @@ export function playerStats(
   };
 }
 
-export function enemyForFloor(floorNumber: number): Enemy {
-  const floor = floorDefinition(floorNumber);
-  return {
-    name: floor.encounter.name,
-    title: floor.encounter.title,
-    maxHp: floor.encounter.hp.max * floor.encounter.count.max,
-    minDamage: floor.encounter.damage.min,
-    maxDamage: floor.encounter.damage.max,
-    xpReward: floor.xpReward,
-  };
-}
-
 export function playerDamageRange(
-  state: Pick<GameState, 'attackLevel' | 'healthLevel' | 'run'>,
+  state: Pick<GameState, 'attackLevel' | 'healthLevel'>,
 ) {
-  if (state.run.equippedItemId === 'rusted-war-axe') return { min: 2, max: 24 };
   const player = playerStats(state);
   return { min: player.minDamage, max: player.maxDamage };
 }
@@ -252,49 +219,44 @@ function prepareFloor(
   floorNumber: number,
   seed: string,
   currentHp: number,
-  bag: LootStack[],
 ): GameState {
   const floor = floorDefinition(floorNumber);
   const player = playerStats(state);
-  const damage = playerDamageRange(state);
+  const playerDamage = playerDamageRange(state);
   const result = resolveCombat({
     seed,
     floor,
     player: {
       currentHp,
       maxHp: player.maxHp,
-      damage,
+      damage: playerDamage,
       armor: player.armor,
     },
   });
-  const enemyMaxHp = result.initialEnemyHp.reduce((total, hp) => total + hp, 0);
+  const enemyMaxHp = result.initialEnemyHp[0] ?? 0;
+
   return {
     ...state,
-    selectedFloor: floorNumber,
+    highestFloor: Math.max(state.highestFloor, floorNumber),
     run: {
+      ...state.run,
       status: 'fighting',
-      seed: state.run.seed || seed,
       floor: floorNumber,
       playerHp: currentHp,
-      bag,
       events: result.events,
       eventIndex: 0,
-      pendingLoot: result.outcome === 'victory' ? resolveLoot(seed, floor) : [],
-      equippedItemId: state.run.equippedItemId,
     },
     combat: {
       status: 'fighting',
       playerHp: currentHp,
+      playerMaxHp: player.maxHp,
+      playerDamage,
       enemyHp: enemyMaxHp,
       enemyMaxHp,
-      enemyCount: result.enemyCount,
+      enemyDamage: floor.encounter.damage,
       enemyName: floor.encounter.name,
-      enemyTitle: floor.encounter.title,
       lastPlayerDamage: null,
       lastEnemyDamage: null,
-      log: [
-        `Floor ${floorNumber}: ${result.enemyCount}× ${floor.encounter.name}.`,
-      ],
     },
   };
 }
@@ -303,11 +265,17 @@ export function startRun(state: GameState, seed: string): GameState {
   if (runIsActive(state)) return state;
   const player = playerStats(state);
   return prepareFloor(
-    { ...state, run: { ...emptyRun(), seed } },
+    {
+      ...state,
+      run: {
+        ...emptyRun(),
+        seed,
+        startingPlayerLevel: state.playerLevel,
+      },
+    },
     1,
     `${seed}:floor:1`,
     player.maxHp,
-    [],
   );
 }
 
@@ -316,22 +284,20 @@ export function advanceCombatEvent(state: GameState): GameState {
   const event = state.run.events[state.run.eventIndex];
   if (!event) return state;
   const nextIndex = state.run.eventIndex + 1;
+
   if (event.type === 'player-attack') {
     return {
       ...state,
       run: { ...state.run, eventIndex: nextIndex },
       combat: {
         ...state.combat,
-        enemyHp: Math.max(0, state.combat.enemyHp - event.damage),
+        enemyHp: event.targetHp,
         lastPlayerDamage: event.damage,
         lastEnemyDamage: null,
-        log: [`You deal ${event.damage} damage.`, ...state.combat.log].slice(
-          0,
-          12,
-        ),
       },
     };
   }
+
   if (event.type === 'enemy-attack') {
     return {
       ...state,
@@ -341,53 +307,40 @@ export function advanceCombatEvent(state: GameState): GameState {
         playerHp: event.playerHp,
         lastPlayerDamage: null,
         lastEnemyDamage: event.damage,
-        log: [`You take ${event.damage} damage.`, ...state.combat.log].slice(
-          0,
-          12,
-        ),
       },
     };
   }
+
   if (event.type === 'victory') {
-    const floor = floorDefinition(state.run.floor);
-    const bag = mergeLoot(state.run.bag, state.run.pendingLoot);
-    const rewarded = addPlayerXp(state, floor.xpReward);
-    return {
-      ...rewarded,
-      highestFloor: Math.max(state.highestFloor, state.run.floor + 1),
-      selectedFloor: state.run.floor + 1,
+    const nextFloor = state.run.floor + 1;
+    const clearedFloor = floorDefinition(state.run.floor);
+    const withXp = {
+      ...state,
       run: {
         ...state.run,
-        status: 'decision',
         playerHp: event.playerHp,
-        bag,
-        pendingLoot: [],
+        xpGained: state.run.xpGained + clearedFloor.xpReward,
         eventIndex: nextIndex,
       },
-      combat: {
-        ...state.combat,
-        status: 'victory',
-        enemyHp: 0,
-        playerHp: event.playerHp,
-        lastPlayerDamage: null,
-        lastEnemyDamage: null,
-        log: ['Victory. Loot added to the bag.', ...state.combat.log].slice(
-          0,
-          12,
-        ),
-      },
     };
+    return prepareFloor(
+      withXp,
+      nextFloor,
+      `${state.run.seed}:floor:${nextFloor}`,
+      event.playerHp,
+    );
   }
+
+  const rewarded = addPlayerXp(state, state.run.xpGained);
   return {
-    ...state,
+    ...rewarded,
     run: {
       ...state.run,
-      status: 'dead',
+      status: 'results',
       playerHp: 0,
-      bag: [],
-      pendingLoot: [],
-      equippedItemId: null,
-      eventIndex: nextIndex,
+      levelsGained: rewarded.playerLevel - state.run.startingPlayerLevel,
+      events: [],
+      eventIndex: 0,
     },
     combat: {
       ...state.combat,
@@ -395,92 +348,30 @@ export function advanceCombatEvent(state: GameState): GameState {
       playerHp: 0,
       lastPlayerDamage: null,
       lastEnemyDamage: null,
-      log: ['Defeated. The unbanked bag is lost.', ...state.combat.log].slice(
-        0,
-        12,
-      ),
     },
   };
-}
-
-export function skipCombat(state: GameState): GameState {
-  let next = state;
-  while (next.run.status === 'fighting') next = advanceCombatEvent(next);
-  return next;
-}
-
-export function continueRun(state: GameState): GameState {
-  if (state.run.status !== 'decision') return state;
-  const nextFloor = state.run.floor + 1;
-  return prepareFloor(
-    state,
-    nextFloor,
-    `${state.run.seed}:floor:${nextFloor}`,
-    state.run.playerHp,
-    state.run.bag,
-  );
-}
-
-export function bankRun(state: GameState): GameState {
-  if (state.run.status !== 'decision') return state;
-  return {
-    ...state,
-    inventory: mergeLoot(state.inventory, state.run.bag),
-    run: {
-      ...state.run,
-      status: 'returned',
-      bag: [],
-      pendingLoot: [],
-      events: [],
-      eventIndex: 0,
-      equippedItemId: null,
-    },
-    combat: {
-      ...state.combat,
-      log: [
-        'Everything in the bag is now permanent.',
-        ...state.combat.log,
-      ].slice(0, 12),
-    },
-  };
-}
-
-export function equipRunItem(state: GameState, itemId: string): GameState {
-  if (state.run.status !== 'decision') return state;
-  if (!state.run.bag.some((item) => item.id === itemId)) return state;
-  if (itemId !== 'rusted-war-axe') return state;
-  return { ...state, run: { ...state.run, equippedItemId: itemId } };
 }
 
 export function resetRun(state: GameState): GameState {
   if (runIsActive(state)) return state;
-  return resetCombat({ ...state, run: emptyRun() });
-}
-
-export function resetCombat(state: GameState): GameState {
-  if (runIsActive(state)) return state;
   const player = playerStats(state);
-  return { ...state, combat: previewCombat(state.selectedFloor, player.maxHp) };
+  return {
+    ...state,
+    run: emptyRun(),
+    combat: emptyCombat(player.maxHp, playerDamageRange(state)),
+  };
 }
 
-type LegacySave = {
+type LegacySave = Partial<GameState> & {
   saveVersion?: number;
   attackShare?: number;
   attack?: { level?: number; progress?: number };
   health?: { level?: number; progress?: number };
-  playerLevel?: number;
-  playerXp?: number;
-  attackPoints?: number;
-  healthPoints?: number;
-  attackLevel?: number;
-  attackProgress?: number;
-  healthLevel?: number;
-  healthProgress?: number;
-  highestFloor?: number;
   selectedFloor?: number;
 };
 
 function migrateOldSave(save: LegacySave): GameState {
+  const highestFloor = Math.max(1, (save.highestFloor ?? 2) - 1);
   if (save.saveVersion === 1) {
     const attackLevel = Math.max(1, Math.floor(save.attack?.level ?? 1));
     const healthLevel = Math.max(1, Math.floor(save.health?.level ?? 1));
@@ -497,10 +388,10 @@ function migrateOldSave(save: LegacySave): GameState {
       healthLevel,
       attackProgress: save.attack?.progress ?? 0,
       healthProgress: save.health?.progress ?? 0,
-      highestFloor: save.highestFloor ?? 1,
-      selectedFloor: save.selectedFloor ?? 1,
+      highestFloor,
     });
   }
+
   const pointsAsLevels = save.saveVersion === 2 || save.saveVersion === 3;
   return normalizeSave({
     ...initialGameState,
@@ -516,20 +407,18 @@ function migrateOldSave(save: LegacySave): GameState {
       ? (save.healthPoints ?? 1)
       : (save.healthLevel ?? 1),
     healthProgress: save.healthProgress ?? 0,
-    highestFloor: save.highestFloor ?? 1,
-    selectedFloor: save.selectedFloor ?? 1,
+    highestFloor,
   });
 }
 
 export function loadGame(raw: string | null): GameState {
   if (!raw) return initialGameState;
   try {
-    const parsed = JSON.parse(raw) as Partial<GameState> & LegacySave;
+    const parsed = JSON.parse(raw) as LegacySave;
     if (parsed.saveVersion !== SAVE_VERSION) return migrateOldSave(parsed);
     return normalizeSave({
       ...initialGameState,
       ...parsed,
-      inventory: Array.isArray(parsed.inventory) ? parsed.inventory : [],
       run: { ...emptyRun(), ...parsed.run },
       combat: { ...initialGameState.combat, ...parsed.combat },
     });
@@ -572,37 +461,23 @@ function normalizeSave(state: GameState): GameState {
     );
   }
   normalized.highestFloor = Math.max(1, Math.floor(normalized.highestFloor));
-  normalized.selectedFloor = Math.max(
-    1,
-    Math.min(normalized.highestFloor, Math.floor(normalized.selectedFloor)),
-  );
-  normalized.inventory = Array.isArray(normalized.inventory)
-    ? normalized.inventory
-    : [];
   normalized.run = { ...emptyRun(), ...normalized.run };
-  normalized.run.bag = Array.isArray(normalized.run.bag)
-    ? normalized.run.bag
-    : [];
   normalized.run.events = Array.isArray(normalized.run.events)
     ? normalized.run.events
     : [];
-  normalized.run.pendingLoot = Array.isArray(normalized.run.pendingLoot)
-    ? normalized.run.pendingLoot
-    : [];
-  return runIsActive(normalized) ? normalized : resetCombat(normalized);
+  if (normalized.run.status === 'fighting') return normalized;
+  if (normalized.run.status === 'results') {
+    normalized.run.events = [];
+    normalized.run.eventIndex = 0;
+    return normalized;
+  }
+  return resetRun(normalized);
 }
 
 export function saveableState(state: GameState): GameState {
   return structuredClone(state);
 }
 
-export function formatRange(range: { min: number; max: number }) {
+export function formatRange(range: IntegerRange) {
   return range.min === range.max ? `${range.min}` : `${range.min}–${range.max}`;
-}
-
-export function floorPreviewForState(state: GameState): FloorDefinition {
-  if (state.run.status === 'decision')
-    return floorDefinition(state.run.floor + 1);
-  if (state.run.status === 'fighting') return floorDefinition(state.run.floor);
-  return floorDefinition(state.selectedFloor);
 }

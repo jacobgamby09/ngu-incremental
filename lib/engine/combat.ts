@@ -15,10 +15,7 @@ export function resolveCombat(input: {
 }): CombatResult {
   const { seed, player, floor } = input;
   const rng = createRng(`${seed}:combat`);
-  const enemyCount = rng.integer(
-    floor.encounter.count.min,
-    floor.encounter.count.max,
-  );
+  const enemyCount = 1;
   const enemyHp = Array.from({ length: enemyCount }, () =>
     rng.integer(floor.encounter.hp.min, floor.encounter.hp.max),
   );
@@ -101,8 +98,5 @@ export function canFloorDamagePlayer(
 ) {
   if (Math.max(0, floor.encounter.damage.max - player.armor) === 0)
     return false;
-  return !(
-    floor.encounter.count.max === 1 &&
-    player.damage.min >= floor.encounter.hp.max
-  );
+  return player.damage.min < floor.encounter.hp.max;
 }

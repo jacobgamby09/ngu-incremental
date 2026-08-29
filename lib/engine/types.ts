@@ -3,43 +3,16 @@ export type IntegerRange = {
   max: number;
 };
 
-export type MobRole = 'Common' | 'Elite' | 'Boss';
-export type LootRarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic';
-
 export type EnemyDefinition = {
   id: string;
   name: string;
-  title: string;
-  role: MobRole;
-  count: IntegerRange;
   hp: IntegerRange;
   damage: IntegerRange;
-  rules: string[];
-};
-
-export type LootEntry = {
-  id: string;
-  name: string;
-  rarity: LootRarity;
-  dropChance: number;
-  quantity: IntegerRange;
-  knownValue: number;
-};
-
-export type LootStack = {
-  id: string;
-  name: string;
-  rarity: LootRarity;
-  quantity: number;
-  knownValue: number;
 };
 
 export type FloorDefinition = {
   floor: number;
-  name: string;
-  description: string;
   encounter: EnemyDefinition;
-  lootTable: LootEntry[];
   xpReward: number;
 };
 
