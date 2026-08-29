@@ -2,28 +2,31 @@ import { describe, expect, it } from 'vitest';
 
 import {
   SAVE_VERSION,
+  STAT_TRAINING_PER_POINT,
   TRAINING_XP_PER_SECOND,
   addPlayerXp,
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
   enemyForFloor,
+  floorDefinition,
   initialGameState,
   loadGame,
   playerStats,
   resolveCombatTick,
   returnStatPoint,
   startCombat,
+  statXpNeeded,
   xpNeeded,
 } from './game';
 
 describe('player level progression', () => {
-  it('sends all automatic training into one player XP bar', () => {
+  it('advances player XP and both allocated stat training bars', () => {
     const next = advanceTraining(initialGameState, 1);
 
     expect(next.playerXp - initialGameState.playerXp).toBeCloseTo(TRAINING_XP_PER_SECOND, 5);
-    expect(next.attackPoints).toBe(initialGameState.attackPoints);
-    expect(next.healthPoints).toBe(initialGameState.healthPoints);
+    expect(next.attackProgress).toBe(STAT_TRAINING_PER_POINT);
+    expect(next.healthProgress).toBe(STAT_TRAINING_PER_POINT);
   });
 
   it('grants one available stat point on level-up and carries overflow XP', () => {
@@ -48,14 +51,68 @@ describe('player level progression', () => {
     expect(availableStatPoints(returned)).toBe(1);
   });
 
-  it('derives combat stats only from allocated points', () => {
-    expect(playerStats({ attackPoints: 3, healthPoints: 4 })).toEqual({
+  it('levels a stat directly when its live training bar completes', () => {
+    const state = {
+      ...initialGameState,
+      attackProgress: statXpNeeded(initialGameState.attackLevel) - 2,
+      healthPoints: 0,
+    };
+    const next = advanceTraining(state, 1);
+
+    expect(next.attackLevel).toBe(initialGameState.attackLevel + 1);
+    expect(next.attackProgress).toBe(STAT_TRAINING_PER_POINT - 2);
+    expect(next.healthLevel).toBe(initialGameState.healthLevel);
+    expect(next.healthProgress).toBe(initialGameState.healthProgress);
+  });
+
+  it('pauses a stat with no points and speeds up linearly with more points', () => {
+    const state = { ...initialGameState, playerLevel: 5, attackPoints: 0, healthPoints: 3 };
+    const next = advanceTraining(state, 1);
+
+    expect(next.attackProgress).toBe(state.attackProgress);
+    expect(next.healthProgress).toBe(STAT_TRAINING_PER_POINT * 3);
+  });
+
+  it('syncs idle combat health when health training raises max HP', () => {
+    const state = {
+      ...initialGameState,
+      attackPoints: 0,
+      healthProgress: statXpNeeded(initialGameState.healthLevel) - 2,
+    };
+    const next = advanceTraining(state, 1);
+
+    expect(next.healthLevel).toBe(initialGameState.healthLevel + 1);
+    expect(next.combat.playerHp).toBe(playerStats(next).maxHp);
+  });
+
+  it('derives combat stats from permanent stat levels, not allocated points', () => {
+    expect(playerStats({ attackLevel: 3, healthLevel: 4 })).toEqual({
       minDamage: 3,
       maxDamage: 14,
       maxHp: 60,
     });
   });
 
+});
+
+describe('floor definitions', () => {
+  it('provides mobs, recommendations and a future loot table for each floor', () => {
+    const floor = floorDefinition(1);
+
+    expect(floor.name).toBe('Ashen Tunnels');
+    expect(floor.mobs.length).toBeGreaterThanOrEqual(3);
+    expect(floor.lootTable.length).toBeGreaterThanOrEqual(3);
+    expect(floor.recommendedAttack).toBeGreaterThan(0);
+    expect(enemyForFloor(1).name).toBe(floor.mobs[0].name);
+  });
+
+  it('scales definitions beyond the authored floor set', () => {
+    const floor = floorDefinition(7);
+
+    expect(floor.floor).toBe(7);
+    expect(floor.name).toContain('Depth 2');
+    expect(floor.recommendedAttack).toBe(13);
+  });
 });
 
 describe('dungeon combat', () => {
@@ -96,9 +153,11 @@ describe('save handling', () => {
     expect(migrated.saveVersion).toBe(SAVE_VERSION);
     expect(migrated.playerLevel).toBe(3);
     expect(migrated.attackPoints + migrated.healthPoints).toBe(2);
+    expect(migrated.attackLevel).toBe(1);
+    expect(migrated.healthLevel).toBe(1);
   });
 
-  it('preserves levels and allocated points from the previous level save', () => {
+  it('preserves combat power and allocated points from the previous level save', () => {
     const migrated = loadGame(JSON.stringify({
       saveVersion: 2,
       playerLevel: 7,
@@ -116,6 +175,8 @@ describe('save handling', () => {
     expect(migrated.playerXp).toBe(35);
     expect(migrated.attackPoints).toBe(4);
     expect(migrated.healthPoints).toBe(2);
+    expect(migrated.attackLevel).toBe(4);
+    expect(migrated.healthLevel).toBe(2);
     expect(migrated.highestFloor).toBe(5);
     expect(migrated.selectedFloor).toBe(4);
     expect(migrated).not.toHaveProperty('essence');

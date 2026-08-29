@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Activity,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Dumbbell,
   Heart,
+  LockKeyhole,
+  Map,
   Minus,
+  PackageOpen,
   Play,
   Plus,
   RotateCcw,
@@ -18,16 +19,18 @@ import {
   Square,
   Swords,
   Trophy,
+  X,
 } from 'lucide-react';
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   SAVE_KEY,
+  STAT_TRAINING_PER_POINT,
   advanceTraining,
   allocateStatPoint,
   availableStatPoints,
-  earnedStatPoints,
   enemyForFloor,
+  floorDefinition,
   initialGameState,
   loadGame,
   playerStats,
@@ -37,7 +40,9 @@ import {
   resolveCombatTick,
   saveableState,
   startCombat,
+  statXpNeeded,
   xpNeeded,
+  type FloorDefinition,
   type GameState,
   type StatKind,
 } from '@/lib/game';
@@ -87,7 +92,9 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
   const isAttack = kind === 'attack';
   const points = isAttack ? state.attackPoints : state.healthPoints;
   const available = availableStatPoints(state);
-  const earned = earnedStatPoints(state);
+  const level = isAttack ? state.attackLevel : state.healthLevel;
+  const progress = isAttack ? state.attackProgress : state.healthProgress;
+  const required = statXpNeeded(level);
   const derived = playerStats(state);
   const Icon = isAttack ? Swords : Heart;
 
@@ -96,20 +103,23 @@ function StatCard({ kind, state, dispatch }: { kind: StatKind; state: GameState;
       <CardHeader>
         <div className="stat-title-row">
           <div className="stat-icon"><Icon aria-hidden="true" /></div>
-          <div><p className="eyebrow">{isAttack ? 'Attack points' : 'Health points'}</p><CardTitle>{isAttack ? 'Strike harder' : 'Endure longer'}</CardTitle></div>
-          <div className="stat-level"><span>PTS</span>{points}</div>
+          <div><p className="eyebrow">{isAttack ? 'Attack training' : 'Health training'}</p><CardTitle>{isAttack ? 'Strike harder' : 'Endure longer'}</CardTitle></div>
+          <div className="stat-level"><span>LV.</span>{level}</div>
         </div>
       </CardHeader>
       <CardContent>
         <div className="stat-metric-row">
           <div><span>{isAttack ? 'Damage' : 'Max health'}</span><strong>{isAttack ? `${derived.minDamage}–${derived.maxDamage}` : derived.maxHp}</strong></div>
-          <div className="rate"><span>Each point</span><strong>{isAttack ? '+3' : '+10'}<small> {isAttack ? 'MAX DMG' : 'HP'}</small></strong></div>
+          <div className="rate"><span>Training speed</span><strong>{points * STAT_TRAINING_PER_POINT}<small> / SEC</small></strong></div>
         </div>
-        <div className="progress-copy stat-progress-copy"><span>Allocated points</span><strong>{points} / {earned}</strong></div>
-        <GameProgress label={`${isAttack ? 'Attack' : 'Health'} point allocation`} value={earned === 0 ? 0 : points / earned * 100} />
-        <div className="point-controls">
-          <button type="button" className="point-button return-point" aria-label={`Remove one ${kind} point`} disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /></button>
-          <button type="button" className="point-button allocate-point" aria-label={`Add one ${kind} point`} disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /></button>
+        <div className="progress-copy stat-progress-copy"><span>Next level</span><strong>{Math.floor(progress)} / {required}</strong></div>
+        <GameProgress label={`${isAttack ? 'Attack' : 'Health'} progress to level ${level + 1}`} value={progress / required * 100} />
+        <div className="point-allocation-row">
+          <div className="assigned-points"><span>Assigned</span><strong>{points}</strong><small>{points === 0 ? 'Paused' : 'Training'}</small></div>
+          <div className="point-controls">
+            <button type="button" className="point-button return-point" aria-label={`Remove one ${kind} point`} disabled={points === 0} onClick={() => dispatch({ type: 'return-point', kind })}><Minus aria-hidden="true" /></button>
+            <button type="button" className="point-button allocate-point" aria-label={`Add one ${kind} point`} disabled={available === 0} onClick={() => dispatch({ type: 'allocate-point', kind })}><Plus aria-hidden="true" /></button>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -134,8 +144,8 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
           <div><p className="eyebrow">Player</p><h2 id="player-heading">The Wanderer</h2></div>
         </div>
         <div className="summary-grid">
-          <div><Swords aria-hidden="true" /><span>ATK +{state.attackPoints}</span><strong>{stats.minDamage}–{stats.maxDamage}</strong></div>
-          <div><Heart aria-hidden="true" /><span>HP +{state.healthPoints}</span><strong>{stats.maxHp}</strong></div>
+          <div><Swords aria-hidden="true" /><span>ATK LV {state.attackLevel}</span><strong>{stats.minDamage}–{stats.maxDamage}</strong></div>
+          <div><Heart aria-hidden="true" /><span>HP LV {state.healthLevel}</span><strong>{stats.maxHp}</strong></div>
           <div><Activity aria-hidden="true" /><span>BEST FLOOR</span><strong>{state.highestFloor}</strong></div>
         </div>
       </section>
@@ -160,7 +170,7 @@ function TrainingScreen({ state, dispatch }: { state: GameState; dispatch: React
       <div className="allocation-intro"><div><p className="eyebrow">Stat allocation</p><h2>Build your fighter</h2></div><span>Free respec</span></div>
       <StatCard kind="attack" state={state} dispatch={dispatch} />
       <StatCard kind="health" state={state} dispatch={dispatch} />
-      <p className="training-note"><Activity aria-hidden="true" /> Training earns player XP automatically. Points can always be moved for free.</p>
+      <p className="training-note"><Activity aria-hidden="true" /> Assigned points train stats continuously. Move them freely without losing levels.</p>
     </div>
   );
 }
@@ -185,19 +195,54 @@ function Fighter({ side, name, title, hp, maxHp, damage, hit }: { side: 'enemy' 
   );
 }
 
+function FloorIntel({ floor }: { floor: FloorDefinition }) {
+  return (
+    <Card className="floor-intel">
+      <CardHeader>
+        <div className="floor-intel-heading">
+          <div><p className="eyebrow">Floor {floor.floor}</p><CardTitle>{floor.name}</CardTitle></div>
+          <span>Intel</span>
+        </div>
+        <p className="floor-description">{floor.description}</p>
+        <div className="recommended-stats">
+          <span><Swords aria-hidden="true" /> ATK LV {floor.recommendedAttack}</span>
+          <span><Heart aria-hidden="true" /> HP LV {floor.recommendedHealth}</span>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <section className="intel-section" aria-labelledby="mob-list-heading">
+          <div className="intel-section-heading"><Map aria-hidden="true" /><h3 id="mob-list-heading">Mobs</h3><small>{floor.mobs.length} known</small></div>
+          <ul className="mob-list">
+            {floor.mobs.map((mob) => <li key={mob.name}><div><strong>{mob.name}</strong><small>{mob.title}</small></div><span className={`mob-role ${mob.role.toLowerCase()}`}>{mob.role}</span></li>)}
+          </ul>
+        </section>
+        <section className="intel-section loot-section" aria-labelledby="loot-table-heading">
+          <div className="intel-section-heading"><PackageOpen aria-hidden="true" /><h3 id="loot-table-heading">Loot table</h3><small>Preview</small></div>
+          <ul className="loot-list">
+            {floor.lootTable.length > 0 ? floor.lootTable.map((loot) => <li key={loot.id}><span className={`loot-rarity ${loot.rarity.toLowerCase()}`} /><strong>{loot.name}</strong><small>{loot.rarity}</small><b>{loot.dropChance}%</b></li>) : <li className="empty-loot">No loot configured yet</li>}
+          </ul>
+        </section>
+      </CardContent>
+    </Card>
+  );
+}
+
 function DungeonScreen({ state, dispatch }: { state: GameState; dispatch: React.Dispatch<Action> }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const enemy = enemyForFloor(state.selectedFloor);
+  const floor = useMemo(() => floorDefinition(state.selectedFloor), [state.selectedFloor]);
   const player = playerStats(state);
   const fighting = state.combat.status === 'fighting';
-  const canGoDown = state.selectedFloor > 1 && !fighting;
-  const canGoUp = state.selectedFloor < state.highestFloor && !fighting;
+  const visibleFloors = useMemo(() => Array.from({ length: Math.max(6, state.highestFloor + 1) }, (_, index) => floorDefinition(index + 1)), [state.highestFloor]);
 
   return (
     <div className="screen dungeon-screen">
       <header className="dungeon-header">
         <div><p className="eyebrow">The descent</p><h1>DUNGEON</h1></div>
-        <div className="floor-badge"><span>FLOOR</span><strong>{state.selectedFloor}</strong></div>
+        <button className="floor-badge" type="button" disabled={fighting} onClick={() => setPickerOpen(true)}><span>FLOOR</span><strong>{state.selectedFloor}</strong><ChevronDown aria-hidden="true" /></button>
       </header>
+
+      <FloorIntel floor={floor} />
 
       <Card className="combat-card">
         <CardContent>
@@ -207,17 +252,11 @@ function DungeonScreen({ state, dispatch }: { state: GameState; dispatch: React.
             <span className="battle-line" /><Swords /><span className="battle-state">{fighting ? 'CLASHING' : state.combat.status.toUpperCase()}</span>
           </div>
 
-          <Fighter side="player" name="The Wanderer" title={`Level ${state.playerLevel} · ATK +${state.attackPoints}`} hp={state.combat.playerHp} maxHp={player.maxHp} damage={`${player.minDamage}–${player.maxDamage}`} hit={state.combat.lastEnemyDamage} />
+          <Fighter side="player" name="The Wanderer" title={`Player ${state.playerLevel} · ATK LV ${state.attackLevel}`} hp={state.combat.playerHp} maxHp={player.maxHp} damage={`${player.minDamage}–${player.maxDamage}`} hit={state.combat.lastEnemyDamage} />
         </CardContent>
       </Card>
 
       <section className="combat-controls" aria-label="Dungeon controls">
-        <div className="floor-selector">
-          <button className="floor-button" type="button" aria-label="Previous floor" disabled={!canGoDown} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor - 1 })}><ChevronLeft /></button>
-          <div><span>Selected floor</span><strong>{state.selectedFloor}</strong><small>{enemy.xpReward} XP</small></div>
-          <button className="floor-button" type="button" aria-label="Next floor" disabled={!canGoUp} onClick={() => dispatch({ type: 'select-floor', floor: state.selectedFloor + 1 })}><ChevronRight /></button>
-        </div>
-
         {state.combat.status === 'victory' && <div className="result-banner victory"><Trophy aria-hidden="true" /><span>Floor cleared</span><strong>+{enemy.xpReward} XP</strong></div>}
         {state.combat.status === 'defeat' && <div className="result-banner defeat"><Skull aria-hidden="true" /><span>Defeated</span><strong>Train and return</strong></div>}
 
@@ -231,6 +270,23 @@ function DungeonScreen({ state, dispatch }: { state: GameState; dispatch: React.
           <ol>{state.combat.log.map((entry, index) => <li key={`${entry}-${index}`}>{entry}</li>)}</ol>
         </details>
       </section>
+
+      {pickerOpen && <dialog open className="floor-picker-dialog" aria-labelledby="floor-picker-title" onCancel={() => setPickerOpen(false)}>
+        <section className="floor-picker">
+          <header><div><p className="eyebrow">Dungeon map</p><h2 id="floor-picker-title">Choose a floor</h2></div><button type="button" aria-label="Close floor selector" onClick={() => setPickerOpen(false)}><X aria-hidden="true" /></button></header>
+          <div className="floor-picker-list">
+            {visibleFloors.map((option) => {
+              const unlocked = option.floor <= state.highestFloor;
+              const selected = option.floor === state.selectedFloor;
+              return <button key={option.floor} type="button" className={`floor-option ${selected ? 'selected' : ''}`} disabled={!unlocked} onClick={() => { dispatch({ type: 'select-floor', floor: option.floor }); setPickerOpen(false); }}>
+                <span className="floor-option-number">{unlocked ? option.floor : <LockKeyhole aria-hidden="true" />}</span>
+                <span className="floor-option-copy"><strong>{option.name}</strong><small>{unlocked ? `${option.mobs.length} mobs · ${option.lootTable.length} drops` : 'Locked'}</small></span>
+                {selected && <span className="floor-option-status">Selected</span>}
+              </button>;
+            })}
+          </div>
+        </section>
+      </dialog>}
     </div>
   );
 }
