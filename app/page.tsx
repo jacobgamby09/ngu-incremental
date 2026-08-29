@@ -2,11 +2,9 @@
 
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
-  Activity,
   Backpack,
   ChevronDown,
   Dumbbell,
-  Heart,
   HomeIcon,
   LockKeyhole,
   Map,
@@ -17,7 +15,6 @@ import {
   Shield,
   SkipForward,
   Skull,
-  Star,
   Swords,
   Trophy,
   X,
@@ -26,7 +23,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   SAVE_KEY,
-  STAT_TRAINING_PER_POINT,
   advanceCombatEvent,
   advanceTraining,
   allocateStatPoint,
@@ -50,7 +46,6 @@ import {
   skipCombat,
   startRun,
   statXpNeeded,
-  xpNeeded,
   type FloorDefinition,
   type GameState,
   type LootStack,
@@ -140,63 +135,14 @@ function StatCard({
   const level = isAttack ? state.attackLevel : state.healthLevel;
   const progress = isAttack ? state.attackProgress : state.healthProgress;
   const required = statXpNeeded(level);
-  const derived = playerStats(state);
-  const Icon = isAttack ? Swords : Heart;
 
   return (
     <Card className={`training-stat ${isAttack ? 'attack-stat' : 'hp-stat'}`}>
-      <CardHeader>
-        <div className="stat-title-row">
-          <div className="stat-icon">
-            <Icon aria-hidden="true" />
-          </div>
-          <div>
-            <p className="eyebrow">
-              {isAttack ? 'Attack training' : 'Health training'}
-            </p>
-            <CardTitle>
-              {isAttack ? 'Strike harder' : 'Endure longer'}
-            </CardTitle>
-          </div>
-          <div className="stat-level">
-            <span>LV.</span>
-            {level}
-          </div>
-        </div>
-      </CardHeader>
       <CardContent>
-        <div className="stat-metric-row">
-          <div>
-            <span>{isAttack ? 'Damage' : 'Max health'}</span>
-            <strong>
-              {isAttack
-                ? `${derived.minDamage}–${derived.maxDamage}`
-                : derived.maxHp}
-            </strong>
-          </div>
-          <div className="rate">
-            <span>Training speed</span>
-            <strong>
-              {points * STAT_TRAINING_PER_POINT}
-              <small> / SEC</small>
-            </strong>
-          </div>
-        </div>
-        <div className="progress-copy stat-progress-copy">
-          <span>Next level</span>
-          <strong>
-            {Math.floor(progress)} / {required}
-          </strong>
-        </div>
-        <GameProgress
-          label={`${isAttack ? 'Attack' : 'Health'} progress to level ${level + 1}`}
-          value={(progress / required) * 100}
-        />
-        <div className="point-allocation-row">
-          <div className="assigned-points">
-            <span>Assigned</span>
-            <strong>{points}</strong>
-            <small>{points === 0 ? 'Paused' : 'Training'}</small>
+        <div className="compact-stat-heading">
+          <div className="compact-stat-title">
+            <strong>{isAttack ? 'Attack' : 'Health'}</strong>
+            <span>Level {level}</span>
           </div>
           <div className="point-controls">
             <button
@@ -219,6 +165,10 @@ function StatCard({
             </button>
           </div>
         </div>
+        <GameProgress
+          label={`${isAttack ? 'Attack' : 'Health'} progress to level ${level + 1}`}
+          value={(progress / required) * 100}
+        />
       </CardContent>
     </Card>
   );
@@ -231,106 +181,28 @@ function TrainingScreen({
   state: GameState;
   dispatch: React.Dispatch<Action>;
 }) {
-  const stats = playerStats(state);
-  const requiredXp = xpNeeded(state.playerLevel);
   const available = availableStatPoints(state);
-  const active = runIsActive(state);
 
   return (
     <div className="screen training-screen">
-      <header className="game-header">
+      <header className="training-overview" aria-label="Player progress">
         <div>
-          <p className="eyebrow">Training grounds</p>
-          <h1>IRONBOUND</h1>
+          <span>Player level</span>
+          <strong>{state.playerLevel}</strong>
         </div>
-        <div className="rank-mark" aria-label="Rank: Initiate">
-          <Shield aria-hidden="true" />
-          <span>INITIATE</span>
+        <div>
+          <span>Deepest floor</span>
+          <strong>{Math.max(1, state.highestFloor - 1)}</strong>
         </div>
       </header>
-      <section className="player-summary" aria-labelledby="player-heading">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Player</p>
-            <h2 id="player-heading">The Wanderer</h2>
-          </div>
-        </div>
-        <div className="summary-grid">
-          <div>
-            <Swords aria-hidden="true" />
-            <span>ATK LV {state.attackLevel}</span>
-            <strong>
-              {stats.minDamage}–{stats.maxDamage}
-            </strong>
-          </div>
-          <div>
-            <Heart aria-hidden="true" />
-            <span>HP LV {state.healthLevel}</span>
-            <strong>{stats.maxHp}</strong>
-          </div>
-          <div>
-            <Activity aria-hidden="true" />
-            <span>DEEPEST FLOOR</span>
-            <strong>{Math.max(1, state.highestFloor - 1)}</strong>
-          </div>
-        </div>
-      </section>
-      {active && (
-        <div className="training-paused">
-          <Activity aria-hidden="true" />
-          <span>Training paused while your dungeon run is active.</span>
-        </div>
-      )}
-      <Card className="level-card">
-        <CardHeader>
-          <div className="level-heading">
-            <div className="level-emblem">
-              <Star aria-hidden="true" />
-            </div>
-            <div>
-              <p className="eyebrow">Player level</p>
-              <CardTitle>Every level grants one stat point</CardTitle>
-            </div>
-            <div className="level-number">
-              <span>LV.</span>
-              {state.playerLevel}
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="level-progress-copy">
-            <span>Next stat point</span>
-            <strong>
-              {Math.floor(state.playerXp)} / {requiredXp} XP
-            </strong>
-          </div>
-          <GameProgress
-            label="Player level progress"
-            value={(state.playerXp / requiredXp) * 100}
-          />
-          <div className={`point-pool ${available > 0 ? 'has-points' : ''}`}>
-            <span>Available points</span>
-            <strong>{available}</strong>
-            <small>
-              {available > 0 ? 'Allocate below' : 'Level up for another'}
-            </small>
-          </div>
-        </CardContent>
-      </Card>
-      <div className="allocation-intro">
-        <div>
-          <p className="eyebrow">Stat allocation</p>
-          <h2>Build your fighter</h2>
-        </div>
-        <span>Free respec</span>
+      <div className={`unspent-points ${available > 0 ? 'has-points' : ''}`}>
+        <span>Unspent skill points</span>
+        <strong>{available}</strong>
       </div>
-      <StatCard kind="attack" state={state} dispatch={dispatch} />
-      <StatCard kind="health" state={state} dispatch={dispatch} />
-      <p className="training-note">
-        <PackageOpen aria-hidden="true" /> Banked loot:{' '}
-        {state.inventory.reduce((sum, item) => sum + item.quantity, 0)} items ·{' '}
-        {lootValue(state.inventory)} known value
-      </p>
+      <section className="compact-stat-list" aria-label="Attributes">
+        <StatCard kind="attack" state={state} dispatch={dispatch} />
+        <StatCard kind="health" state={state} dispatch={dispatch} />
+      </section>
     </div>
   );
 }

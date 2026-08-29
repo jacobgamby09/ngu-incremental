@@ -278,7 +278,9 @@
 }
 
 .training-stat {
-  margin-top: 12px;
+  margin-top: 0;
+  gap: 0;
+  padding: 0;
   background: rgb(17 22 32 / 92%);
 }
 .stat-title-row {
@@ -595,6 +597,107 @@
   color: #4e5868;
   cursor: not-allowed;
   opacity: 0.72;
+}
+
+.training-overview {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  padding: 5px 0 14px;
+}
+.training-overview > div {
+  display: grid;
+  gap: 3px;
+}
+.training-overview > div:last-child {
+  justify-items: end;
+  border-left: 1px solid rgb(255 255 255 / 7%);
+}
+.training-overview span,
+.unspent-points span {
+  color: #747f91;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.training-overview strong {
+  color: #e2e5ea;
+  font-family: var(--font-geist-mono);
+  font-size: 1.45rem;
+  line-height: 1;
+}
+.training-overview > div:first-child strong {
+  color: #62d8b0;
+}
+.unspent-points {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 18px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 11px;
+  padding: 10px 13px;
+  background: rgb(17 22 32 / 82%);
+}
+.unspent-points strong {
+  color: #8c96a6;
+  font-family: var(--font-geist-mono);
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.unspent-points.has-points {
+  border-color: rgb(243 180 75 / 27%);
+  background: rgb(243 180 75 / 7%);
+}
+.unspent-points.has-points strong {
+  color: #f3b44b;
+  text-shadow: 0 0 14px rgb(243 180 75 / 24%);
+}
+.compact-stat-list {
+  display: grid;
+  gap: 8px;
+}
+.training-stat [data-slot='card-content'] {
+  padding: 10px 11px 11px;
+}
+.compact-stat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.compact-stat-title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 7px;
+}
+.compact-stat-title strong {
+  color: #dfe3e9;
+  font-size: 0.78rem;
+}
+.compact-stat-title span {
+  color: #737e90;
+  font-family: var(--font-geist-mono);
+  font-size: 0.6rem;
+}
+.compact-stat-heading .point-controls {
+  gap: 6px;
+}
+.compact-stat-heading .point-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+}
+.compact-stat-heading .point-button svg {
+  width: 16px;
+  height: 16px;
+}
+.training-stat .game-progress {
+  height: 5px;
 }
 
 .dungeon-mode {
