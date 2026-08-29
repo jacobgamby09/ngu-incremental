@@ -178,8 +178,7 @@ export function runIsActive(state: Pick<GameState, 'run'>) {
 }
 
 export function advanceTraining(state: GameState, seconds: number): GameState {
-  if (!Number.isFinite(seconds) || seconds <= 0 || runIsActive(state))
-    return state;
+  if (!Number.isFinite(seconds) || seconds <= 0) return state;
   const elapsed = Math.min(seconds, 2);
   const attack = advanceStat(
     state.attackLevel,

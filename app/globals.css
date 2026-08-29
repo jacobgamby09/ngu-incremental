@@ -586,7 +586,7 @@
   background: rgb(243 180 75 / 10%);
   color: #f3c166;
 }
-.hp-stat .point-button.allocate-point {
+.hp-stat .point-button.allocate-point:not(:disabled) {
   border-color: rgb(98 216 176 / 24%);
   background: rgb(98 216 176 / 10%);
   color: #69d5b0;

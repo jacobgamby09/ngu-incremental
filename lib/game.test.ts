@@ -62,9 +62,16 @@ describe('player progression', () => {
     expect(next.healthProgress).toBe(state.healthProgress);
   });
 
-  it('pauses all training while a run is active', () => {
-    const running = startRun(initialGameState, 'pause-test');
-    expect(advanceTraining(running, 2)).toBe(running);
+  it('continues live stat progress while a run is active', () => {
+    const running = startRun(initialGameState, 'active-training-test');
+    const next = advanceTraining(running, 1);
+    expect(next.attackProgress - running.attackProgress).toBe(
+      STAT_TRAINING_PER_POINT,
+    );
+    expect(next.healthProgress - running.healthProgress).toBe(
+      STAT_TRAINING_PER_POINT,
+    );
+    expect(next.run).toEqual(running.run);
   });
 
   it('derives combat stats from permanent stat levels', () => {
